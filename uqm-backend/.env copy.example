@@ -1,0 +1,38 @@
+# 数据库配置
+DATABASE_URL=postgresql://uqm_user:uqm_password@localhost:5432/uqm_db
+MYSQL_URL=mysql://uqm_user:uqm_password@localhost:3306/uqm_db
+SQLITE_URL=sqlite:///./uqm.db
+
+# Redis配置
+REDIS_URL=redis://localhost:6379/0
+
+# API配置
+DEBUG=True
+HOST=0.0.0.0
+PORT=8000
+SECRET_KEY=your-secret-key-here-change-in-production
+ALLOWED_HOSTS=localhost,127.0.0.1,0.0.0.0
+
+# 缓存配置
+CACHE_TYPE=redis
+CACHE_DEFAULT_TIMEOUT=3600
+CACHE_MAX_SIZE=1000
+
+# 日志配置
+LOG_LEVEL=INFO
+LOG_FORMAT=json
+
+# 查询配置
+MAX_QUERY_TIMEOUT=300
+MAX_CONCURRENT_QUERIES=10
+QUERY_RESULT_LIMIT=10000
+
+# 安全配置
+CORS_ORIGINS="http://localhost:3000,http://localhost:8080"
+CORS_CREDENTIALS=True
+CORS_METHODS="GET,POST,PUT,DELETE,OPTIONS"
+CORS_HEADERS="*"
+
+# 监控配置
+ENABLE_METRICS=True
+METRICS_PATH=/metrics
