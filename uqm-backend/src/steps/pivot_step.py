@@ -21,9 +21,8 @@ class PivotStep(BaseStep):
         Args:
             config: 透视步骤配置
         """
-        super().__init__(config)
-        
-        # 支持的聚合函数
+        # 先初始化支持的聚合函数，在调用 super().__init__ 之前
+        # 因为 BaseStep.__init__ 会调用 validate()，而 validate() 需要访问 supported_agg_functions
         self.supported_agg_functions = {
             'sum': np.sum,
             'mean': np.mean,
@@ -36,6 +35,9 @@ class PivotStep(BaseStep):
             'first': lambda x: x.iloc[0] if len(x) > 0 else None,
             'last': lambda x: x.iloc[-1] if len(x) > 0 else None
         }
+        
+        # 然后调用父类初始化
+        super().__init__(config)
     
     def validate(self) -> None:
         """验证透视步骤配置"""

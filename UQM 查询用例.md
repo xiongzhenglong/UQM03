@@ -4042,3 +4042,220 @@ CREATE TABLE IF NOT EXISTS inventory (
     ```
 
 以上这些场景几乎涵盖了从简单查询、多表连接、聚合分组到复杂的业务洞察。每一个场景都可以通过组合使用您系统中的 `query`, `enrich`, `pivot` 等步骤，用 JSON Schema 的形式来实现。
+```json
+{
+  "uqm": {
+    "metadata": {
+      "name": "EmployeeDepartmentDetailsEnrichment",
+      "description": "通过部门ID关联员工和部门表，以获取员工的详细部门信息。",
+      "version": "1.0",
+      "author": "UQM User"
+    },
+    "steps": [
+      {
+        "name": "query_employees_data",
+        "type": "query",
+        "config": {
+          "data_source": "employees",
+          "dimensions": [
+            "employee_id", 
+            {
+              "expression": "CONCAT(first_name, last_name)",
+              "alias": "name"
+            },
+            "department_id", 
+            "job_title", 
+            "hire_date", 
+            "salary"
+          ],
+          "filters": []
+        }
+      },
+      {
+        "name": "enrich_with_department_info",
+        "type": "enrich",
+        "config": {
+          "source": "query_employees_data",
+          "lookup": {
+            "table": "departments",
+            "columns": ["department_id", "name", "location"]
+          },
+          "on": {
+            "left": "department_id",
+            "right": "department_id"
+          },
+          "join_type": "left"
+        }
+      }
+    ],
+    "output": "enrich_with_department_info"
+  },
+  "parameters": {},
+  "options": {
+    "cache_enabled": false
+  }
+}
+---------------------------------------------------------------------
+{
+    "success": true,
+    "data": [
+        {
+            "employee_id": 1,
+            "name": "张伟",
+            "department_id": 2,
+            "job_title": "IT总监",
+            "hire_date": "2022-01-10",
+            "salary": "35000.00",
+            "name_1": "信息技术部",
+            "location": "上海"
+        },
+        {
+            "employee_id": 2,
+            "name": "王芳",
+            "department_id": 1,
+            "job_title": "HR经理",
+            "hire_date": "2022-03-15",
+            "salary": "25000.00",
+            "name_1": "人力资源部",
+            "location": "北京"
+        },
+        {
+            "employee_id": 3,
+            "name": "李强",
+            "department_id": 2,
+            "job_title": "软件工程师",
+            "hire_date": "2022-02-20",
+            "salary": "18000.00",
+            "name_1": "信息技术部",
+            "location": "上海"
+        },
+        {
+            "employee_id": 4,
+            "name": "刘娜",
+            "department_id": 1,
+            "job_title": "人事专员",
+            "hire_date": "2023-05-30",
+            "salary": "12000.00",
+            "name_1": "人力资源部",
+            "location": "北京"
+        },
+        {
+            "employee_id": 5,
+            "name": "陈军",
+            "department_id": 5,
+            "job_title": "销售总监",
+            "hire_date": "2021-09-01",
+            "salary": "38000.00",
+            "name_1": "销售部",
+            "location": "北京"
+        },
+        {
+            "employee_id": 6,
+            "name": "杨静",
+            "department_id": 5,
+            "job_title": "销售代表",
+            "hire_date": "2023-01-20",
+            "salary": "15000.00",
+            "name_1": "销售部",
+            "location": "北京"
+        },
+        {
+            "employee_id": 7,
+            "name": "MingLi",
+            "department_id": 3,
+            "job_title": "高级财务分析师",
+            "hire_date": "2020-08-11",
+            "salary": "28000.00",
+            "name_1": "财务部",
+            "location": "深圳"
+        },
+        {
+            "employee_id": 8,
+            "name": "PeterSchmidt",
+            "department_id": 6,
+            "job_title": "欧洲区销售经理",
+            "hire_date": "2022-11-01",
+            "salary": "42000.00",
+            "name_1": "欧洲销售部",
+            "location": "德国-柏林"
+        },
+        {
+            "employee_id": 9,
+            "name": "YukiTanaka",
+            "department_id": 4,
+            "job_title": "市场专员",
+            "hire_date": "2024-02-19",
+            "salary": "14000.00",
+            "name_1": "市场营销部",
+            "location": "广州"
+        },
+        {
+            "employee_id": 10,
+            "name": "EmilyJones",
+            "department_id": 2,
+            "job_title": "高级软件工程师",
+            "hire_date": "2024-04-08",
+            "salary": "22000.00",
+            "name_1": "信息技术部",
+            "location": "上海"
+        },
+        {
+            "employee_id": 11,
+            "name": "CarlosGarcia",
+            "department_id": 7,
+            "job_title": "运营经理",
+            "hire_date": "2025-01-15",
+            "salary": "31000.00",
+            "name_1": "研发中心",
+            "location": "成都"
+        },
+        {
+            "employee_id": 12,
+            "name": "SophiaMüller",
+            "department_id": 6,
+            "job_title": "销售助理",
+            "hire_date": "2025-03-20",
+            "salary": "16000.00",
+            "name_1": "欧洲销售部",
+            "location": "德国-柏林"
+        }
+    ],
+    "metadata": {
+        "name": "EmployeeDepartmentDetailsEnrichment",
+        "description": "通过部门ID关联员工和部门表，以获取员工的详细部门信息。",
+        "version": "1.0",
+        "author": "UQM User",
+        "created_at": null,
+        "updated_at": null,
+        "tags": []
+    },
+    "execution_info": {
+        "total_time": 0.04099893569946289,
+        "row_count": 12,
+        "cache_hit": false,
+        "steps_executed": 2
+    },
+    "step_results": [
+        {
+            "step_name": "query_employees_data",
+            "step_type": "query",
+            "status": "completed",
+            "data": null,
+            "row_count": 12,
+            "execution_time": 0.02195286750793457,
+            "cache_hit": false,
+            "error": null
+        },
+        {
+            "step_name": "enrich_with_department_info",
+            "step_type": "enrich",
+            "status": "completed",
+            "data": null,
+            "row_count": 12,
+            "execution_time": 0.018010377883911133,
+            "cache_hit": false,
+            "error": null
+        }
+    ]
+}
+```
