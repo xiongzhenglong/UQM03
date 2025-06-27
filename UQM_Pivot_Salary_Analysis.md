@@ -316,6 +316,19 @@
 }
 ```
 
+**all_parameters_exist**: 检查多个参数是否都存在
+```json
+{
+  "field": "employees.hire_date",
+  "operator": "BETWEEN",
+  "value": ["$hire_date_from", "$hire_date_to"],
+  "conditional": {
+    "type": "all_parameters_exist",
+    "parameters": ["hire_date_from", "hire_date_to"]
+  }
+}
+```
+
 **expression**: 自定义条件表达式
 ```json
 {
@@ -468,6 +481,15 @@
                 "parameter": "hire_date_to",
                 "empty_values": [null, ""]
               }
+            },
+            {
+              "field": "employees.hire_date",
+              "operator": "BETWEEN",
+              "value": ["$hire_date_from", "$hire_date_to"],
+              "conditional": {
+                "type": "all_parameters_exist",
+                "parameters": ["hire_date_from", "hire_date_to"]
+              }
             }
           ]
         }
@@ -496,6 +518,60 @@
 }
 ```
 
+### 条件过滤器高级应用示例
+
+#### 示例1：地理位置范围查询
+```json
+{
+  "field": "location",
+  "operator": "WITHIN_BOUNDS",
+  "value": ["$lat_min", "$lat_max", "$lng_min", "$lng_max"],
+  "conditional": {
+    "type": "all_parameters_exist",
+    "parameters": ["lat_min", "lat_max", "lng_min", "lng_max"]
+  }
+}
+```
+
+#### 示例2：复合时间段分析
+```json
+{
+  "field": "transaction_date",
+  "operator": "BETWEEN",
+  "value": ["$quarter_start", "$quarter_end"],
+  "conditional": {
+    "type": "all_parameters_exist",
+    "parameters": ["quarter_start", "quarter_end"]
+  }
+}
+```
+
+#### 示例3：多维度范围过滤
+```json
+{
+  "field": "performance_score",
+  "operator": "BETWEEN",
+  "value": ["$score_min", "$score_max"],
+  "conditional": {
+    "type": "expression",
+    "expression": "$score_min != null && $score_max != null && $score_min < $score_max"
+  }
+}
+```
+
+#### 示例4：依赖参数检查
+```json
+{
+  "field": "employee_level",
+  "operator": ">=",
+  "value": "$min_level",
+  "conditional": {
+    "type": "expression",
+    "expression": "$department == 'management' && $min_level != null"
+  }
+}
+```
+
 ### 使用示例
 
 #### 场景1：只传入部门参数
@@ -520,7 +596,7 @@
 ```
 **效果**: 应用部门和薪资范围过滤器
 
-#### 场景3：只传入时间范围
+#### 场景4：传入完整时间范围（演示 all_parameters_exist）
 ```json
 {
   "parameters": {
@@ -529,9 +605,19 @@
   }
 }
 ```
-**效果**: 只应用时间范围过滤器
+**效果**: 应用 BETWEEN 时间范围过滤器（因为两个时间参数都存在）
 
-#### 场景4：不传入任何参数
+#### 场景5：只传入部分时间参数
+```json
+{
+  "parameters": {
+    "hire_date_from": "2022-01-01"
+  }
+}
+```
+**效果**: 只应用 >= 过滤器，BETWEEN 过滤器被跳过（因为缺少 hire_date_to 参数）
+
+#### 场景6：不传入任何参数
 ```json
 {
   "parameters": {}
@@ -544,6 +630,9 @@
 #### 1. 智能过滤
 - **自动跳过**: 未提供的参数对应的过滤器自动跳过
 - **条件检查**: 支持多种条件检查类型
+  - `parameter_exists`: 单个参数存在性检查
+  - `parameter_not_empty`: 参数非空检查，支持自定义空值
+  - `all_parameters_exist`: 多个参数同时存在检查，适用于 BETWEEN 等复合操作
 - **表达式支持**: 支持复杂的条件表达式
 
 #### 2. 用户友好
@@ -555,6 +644,12 @@
 - **减少过滤**: 跳过不需要的过滤器，提高查询性能
 - **缓存友好**: 不同参数组合可以有效利用缓存
 - **资源节约**: 减少不必要的数据处理
+
+#### 4. 高级应用场景
+- **地理位置范围查询**: 通过坐标范围过滤
+- **复合时间段分析**: 支持季度等复合时间段
+- **多维度范围过滤**: 支持多个字段的范围过滤
+- **依赖参数检查**: 某些条件依赖于其他参数的值
 
 ### 实现细节
 
