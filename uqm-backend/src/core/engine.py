@@ -166,7 +166,7 @@ class UQMEngine(LoggerMixin):
     def _substitute_parameters(self, uqm_data: Dict[str, Any], 
                              parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
-        参数替换处理
+        参数替换处理，支持条件过滤器
         
         Args:
             uqm_data: 解析后的UQM数据
@@ -182,20 +182,28 @@ class UQMEngine(LoggerMixin):
             import copy
             processed_data = copy.deepcopy(uqm_data)
             
+            # 先处理条件过滤器
+            processed_data = self._process_conditional_filters(processed_data, parameters)
+            
             # 将数据转换为JSON字符串进行参数替换
             import json
-            data_str = json.dumps(processed_data)
+            data_str = json.dumps(processed_data, ensure_ascii=False)
             
             # 替换参数
             for param_name, param_value in parameters.items():
                 placeholder = f"${param_name}"
-                # 如果参数值是字符串，需要添加引号
-                if isinstance(param_value, str):
-                    replacement = json.dumps(param_value)
-                else:
-                    replacement = json.dumps(param_value)
                 
+                # 根据参数值类型进行替换
+                if isinstance(param_value, str):
+                    replacement = json.dumps(param_value, ensure_ascii=False)
+                elif isinstance(param_value, (list, dict)):
+                    replacement = json.dumps(param_value, ensure_ascii=False)
+                else:
+                    replacement = json.dumps(param_value, ensure_ascii=False)
+                
+                # 先处理带引号的占位符（用于字符串值）
                 data_str = data_str.replace(f'"{placeholder}"', replacement)
+                # 再处理不带引号的占位符（用于非字符串值）
                 data_str = data_str.replace(placeholder, replacement)
             
             # 转换回字典
@@ -207,6 +215,155 @@ class UQMEngine(LoggerMixin):
         except Exception as e:
             self.log_error("参数替换失败", error=str(e))
             raise ValidationError(f"参数替换失败: {e}")
+    
+    def _process_conditional_filters(self, uqm_data: Dict[str, Any], 
+                                   parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        处理条件过滤器，移除不满足条件的过滤器
+        
+        Args:
+            uqm_data: UQM数据
+            parameters: 参数值字典
+            
+        Returns:
+            处理后的UQM数据
+        """
+        try:
+            steps = uqm_data.get("steps", [])
+            
+            for step in steps:
+                if step.get("type") == "query":
+                    config = step.get("config", {})
+                    filters = config.get("filters", [])
+                    
+                    # 过滤掉不满足条件的过滤器
+                    valid_filters = []
+                    for filter_config in filters:
+                        if self._should_include_filter(filter_config, parameters):
+                            valid_filters.append(filter_config)
+                        else:
+                            self.log_info(
+                                "条件过滤器跳过",
+                                filter_field=filter_config.get("field"),
+                                condition=filter_config.get("conditional")
+                            )
+                    
+                    config["filters"] = valid_filters
+            
+            return uqm_data
+            
+        except Exception as e:
+            self.log_error("条件过滤器处理失败", error=str(e))
+            raise ValidationError(f"条件过滤器处理失败: {e}")
+    
+    def _should_include_filter(self, filter_config: Dict[str, Any], 
+                              parameters: Dict[str, Any]) -> bool:
+        """
+        判断是否应该包含该过滤器
+        
+        Args:
+            filter_config: 过滤器配置
+            parameters: 参数值字典
+            
+        Returns:
+            是否包含该过滤器
+        """
+        conditional = filter_config.get("conditional")
+        if not conditional:
+            # 没有条件配置，直接包含
+            return True
+        
+        condition_type = conditional.get("type")
+        
+        if condition_type == "parameter_exists":
+            param_name = conditional.get("parameter")
+            return param_name in parameters
+        
+        elif condition_type == "parameter_not_empty":
+            param_name = conditional.get("parameter")
+            empty_values = conditional.get("empty_values", [None])
+            
+            if param_name not in parameters:
+                return False
+            
+            param_value = parameters[param_name]
+            return param_value not in empty_values
+        
+        elif condition_type == "all_parameters_exist":
+            param_names = conditional.get("parameters", [])
+            return all(param in parameters for param in param_names)
+        
+        elif condition_type == "expression":
+            expression = conditional.get("expression", "")
+            try:
+                # 简单的表达式评估（可以扩展为更复杂的表达式解析器）
+                return self._evaluate_conditional_expression(expression, parameters)
+            except Exception as e:
+                self.log_warning(f"条件表达式评估失败: {e}")
+                return False
+        
+        else:
+            self.log_warning(f"不支持的条件类型: {condition_type}")
+            return True
+    
+    def _evaluate_conditional_expression(self, expression: str, 
+                                       parameters: Dict[str, Any]) -> bool:
+        """
+        评估条件表达式
+        
+        Args:
+            expression: 条件表达式
+            parameters: 参数值字典
+            
+        Returns:
+            表达式结果
+        """
+        # 替换参数占位符
+        eval_expression = expression
+        
+        # 检查表达式中是否有未提供的参数
+        import re
+        param_pattern = r'\$([a-zA-Z_][a-zA-Z0-9_]*)'
+        required_params = re.findall(param_pattern, expression)
+        
+        for param_name in required_params:
+            placeholder = f"${param_name}"
+            
+            if param_name not in parameters:
+                # 参数不存在，用null替换
+                replacement = "None"
+            else:
+                param_value = parameters[param_name]
+                # 根据参数值类型进行替换
+                if param_value is None:
+                    replacement = "None"
+                elif isinstance(param_value, str):
+                    replacement = f'"{param_value}"'
+                elif isinstance(param_value, bool):
+                    replacement = "True" if param_value else "False"
+                elif isinstance(param_value, list):
+                    replacement = str(param_value)
+                else:
+                    replacement = str(param_value)
+            
+            eval_expression = eval_expression.replace(placeholder, replacement)
+        
+        # 简单的表达式评估（这里可以使用更安全的表达式解析器）
+        try:
+            # 将JavaScript式的null转换为Python的None
+            eval_expression = eval_expression.replace("null", "None")
+            eval_expression = eval_expression.replace("&&", " and ")
+            eval_expression = eval_expression.replace("||", " or ")
+            eval_expression = eval_expression.replace("!=", " != ")
+            eval_expression = eval_expression.replace("==", " == ")
+            
+            # 安全评估表达式
+            result = bool(eval(eval_expression))
+            self.log_info(f"表达式评估成功: {expression} -> {eval_expression} = {result}")
+            return result
+        except Exception as e:
+            self.log_warning(f"表达式评估失败: {expression} -> {eval_expression}, 错误: {e}")
+            return False
     
     def _generate_cache_key(self, uqm_data: Dict[str, Any], 
                            parameters: Dict[str, Any]) -> str:
