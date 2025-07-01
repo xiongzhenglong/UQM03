@@ -160,6 +160,9 @@ class PivotStep(BaseStep):
             # 重置索引
             pivot_df = pivot_df.reset_index()
             
+            # 格式化透视结果（处理column_prefix等）
+            pivot_df = self._format_pivot_result(pivot_df)
+            
             # 转换回字典列表
             result = pivot_df.to_dict('records')
             

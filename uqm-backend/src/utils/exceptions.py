@@ -69,14 +69,25 @@ def setup_exception_handlers(app: FastAPI) -> None:
             method=request.method
         )
         
+        # 根据异常类型设置不同的状态码
+        if isinstance(exc, ExecutionError):
+            status_code = 500  # 执行错误使用500
+        else:
+            status_code = 400  # 其他错误使用400
+        
         return JSONResponse(
-            status_code=400,
+            status_code=status_code,
             content={
+                "success": False,  # 明确标记为失败
                 "error": {
                     "code": exc.error_code,
                     "message": exc.message,
                     "details": exc.details
-                }
+                },
+                "data": None,
+                "metadata": None,
+                "execution_info": None,
+                "step_results": None
             }
         )
     

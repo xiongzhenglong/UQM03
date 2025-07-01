@@ -4259,3 +4259,251 @@ CREATE TABLE IF NOT EXISTS inventory (
     ]
 }
 ```
+
+```json
+{
+  "uqm": {
+  "metadata": {
+    "name": "OrderItemProductCategoryEnrichment",
+    "description": "将订单商品项数据与产品表关联，丰富产品类别信息，用于销售和品类分析。",
+    "version": "1.0",
+    "author": "UQM User"
+  },
+  "steps": [
+    {
+      "name": "query_order_items",
+      "type": "query",
+      "config": {
+        "data_source": "order_items",
+        "dimensions": ["order_item_id", "order_id", "product_id", "quantity", "unit_price"],
+        "filters": []
+      }
+    },
+    {
+      "name": "enrich_with_product_details",
+      "type": "enrich",
+      "config": {
+        "source": "query_order_items",
+        "lookup": {
+          "table": "products",
+          "columns": ["product_id AS id", "product_name", "category"]
+        },
+        "on": {
+          "left": "product_id",
+          "right": "id"
+        },
+        "join_type": "inner"
+      }
+    }
+  ],
+  "output": "enrich_with_product_details"
+},
+  "parameters": {},
+  "options": {
+    "cache_enabled": false
+  }
+}
+---------------------------------------------------------------------------
+{
+    "success": true,
+    "data": [
+        {
+            "order_item_id": 1,
+            "order_id": 1,
+            "product_id": 1,
+            "quantity": 1,
+            "unit_price": "499.00",
+            "id": 1,
+            "product_name": "超高速SSD 1TB",
+            "category": "电子产品"
+        },
+        {
+            "order_item_id": 13,
+            "order_id": 10,
+            "product_id": 1,
+            "quantity": 1,
+            "unit_price": "499.00",
+            "id": 1,
+            "product_name": "超高速SSD 1TB",
+            "category": "电子产品"
+        },
+        {
+            "order_item_id": 2,
+            "order_id": 1,
+            "product_id": 2,
+            "quantity": 1,
+            "unit_price": "380.00",
+            "id": 2,
+            "product_name": "机械键盘",
+            "category": "电子产品"
+        },
+        {
+            "order_item_id": 14,
+            "order_id": 11,
+            "product_id": 2,
+            "quantity": 1,
+            "unit_price": "380.00",
+            "id": 2,
+            "product_name": "机械键盘",
+            "category": "电子产品"
+        },
+        {
+            "order_item_id": 3,
+            "order_id": 2,
+            "product_id": 3,
+            "quantity": 2,
+            "unit_price": "129.00",
+            "id": 3,
+            "product_name": "潮流印花T恤",
+            "category": "服装"
+        },
+        {
+            "order_item_id": 11,
+            "order_id": 8,
+            "product_id": 3,
+            "quantity": 5,
+            "unit_price": "129.00",
+            "id": 3,
+            "product_name": "潮流印花T恤",
+            "category": "服装"
+        },
+        {
+            "order_item_id": 4,
+            "order_id": 3,
+            "product_id": 5,
+            "quantity": 1,
+            "unit_price": "599.00",
+            "id": 5,
+            "product_name": "AI智能音箱",
+            "category": "电子产品"
+        },
+        {
+            "order_item_id": 16,
+            "order_id": 12,
+            "product_id": 5,
+            "quantity": 2,
+            "unit_price": "599.00",
+            "id": 5,
+            "product_name": "AI智能音箱",
+            "category": "电子产品"
+        },
+        {
+            "order_item_id": 5,
+            "order_id": 4,
+            "product_id": 4,
+            "quantity": 1,
+            "unit_price": "299.00",
+            "id": 4,
+            "product_name": "商务休闲裤",
+            "category": "服装"
+        },
+        {
+            "order_item_id": 7,
+            "order_id": 5,
+            "product_id": 7,
+            "quantity": 2,
+            "unit_price": "259.00",
+            "id": 7,
+            "product_name": "高精度光学鼠标",
+            "category": "电子产品"
+        },
+        {
+            "order_item_id": 15,
+            "order_id": 11,
+            "product_id": 7,
+            "quantity": 1,
+            "unit_price": "259.00",
+            "id": 7,
+            "product_name": "高精度光学鼠标",
+            "category": "电子产品"
+        },
+        {
+            "order_item_id": 8,
+            "order_id": 5,
+            "product_id": 11,
+            "quantity": 1,
+            "unit_price": "1299.00",
+            "id": 11,
+            "product_name": "蓝牙降噪耳机",
+            "category": "电子产品"
+        },
+        {
+            "order_item_id": 9,
+            "order_id": 6,
+            "product_id": 8,
+            "quantity": 1,
+            "unit_price": "799.00",
+            "id": 8,
+            "product_name": "日式和风床品四件套",
+            "category": "家居用品"
+        },
+        {
+            "order_item_id": 10,
+            "order_id": 7,
+            "product_id": 10,
+            "quantity": 1,
+            "unit_price": "1599.00",
+            "id": 10,
+            "product_name": "智能升降学习桌",
+            "category": "家居用品"
+        },
+        {
+            "order_item_id": 12,
+            "order_id": 9,
+            "product_id": 9,
+            "quantity": 3,
+            "unit_price": "89.00",
+            "id": 9,
+            "product_name": "《SQL从入门到大神》",
+            "category": "图书"
+        },
+        {
+            "order_item_id": 17,
+            "order_id": 13,
+            "product_id": 9,
+            "quantity": 10,
+            "unit_price": "85.00",
+            "id": 9,
+            "product_name": "《SQL从入门到大神》",
+            "category": "图书"
+        }
+    ],
+    "metadata": {
+        "name": "OrderItemProductCategoryEnrichment",
+        "description": "将订单商品项数据与产品表关联，丰富产品类别信息，用于销售和品类分析。",
+        "version": "1.0",
+        "author": "UQM User",
+        "created_at": null,
+        "updated_at": null,
+        "tags": []
+    },
+    "execution_info": {
+        "total_time": 0.04099702835083008,
+        "row_count": 16,
+        "cache_hit": false,
+        "steps_executed": 2
+    },
+    "step_results": [
+        {
+            "step_name": "query_order_items",
+            "step_type": "query",
+            "status": "completed",
+            "data": null,
+            "row_count": 16,
+            "execution_time": 0.021997690200805664,
+            "cache_hit": false,
+            "error": null
+        },
+        {
+            "step_name": "enrich_with_product_details",
+            "step_type": "enrich",
+            "status": "completed",
+            "data": null,
+            "row_count": 16,
+            "execution_time": 0.018999338150024414,
+            "cache_hit": false,
+            "error": null
+        }
+    ]
+}
+```

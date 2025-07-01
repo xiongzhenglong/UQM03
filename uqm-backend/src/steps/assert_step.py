@@ -21,9 +21,8 @@ class AssertStep(BaseStep):
         Args:
             config: 断言步骤配置
         """
-        super().__init__(config)
-        
-        # 支持的断言类型
+        # 先初始化支持的断言类型，再调用父类初始化
+        # 这样在 validate() 方法中就可以访问 supported_assertions
         self.supported_assertions = {
             'row_count': self._assert_row_count,
             'not_null': self._assert_not_null,
@@ -36,6 +35,9 @@ class AssertStep(BaseStep):
             'value_in': self._assert_value_in,
             'relationship': self._assert_relationship
         }
+        
+        # 调用父类初始化（会触发 validate() 方法）
+        super().__init__(config)
     
     def validate(self) -> None:
         """验证断言步骤配置"""
@@ -238,39 +240,51 @@ class AssertStep(BaseStep):
     
     def _assert_range(self, data: List[Dict[str, Any]], assertion: Dict[str, Any]) -> Dict[str, Any]:
         """断言值范围"""
-        column = assertion.get("column")
+        # 支持 field 和 column 两种字段名（向后兼容）
+        field_name = assertion.get("field") or assertion.get("column")
         min_value = assertion.get("min")
         max_value = assertion.get("max")
+        
+        if not field_name:
+            return {"passed": False, "message": "缺少 field 或 column 参数"}
         
         out_of_range_records = []
         
         for i, record in enumerate(data):
-            if column in record:
-                value = record[column]
-                if isinstance(value, (int, float)):
-                    if min_value is not None and value < min_value:
-                        out_of_range_records.append({
-                            "row": i,
-                            "column": column,
-                            "value": value,
-                            "reason": f"小于最小值 {min_value}"
-                        })
-                    elif max_value is not None and value > max_value:
-                        out_of_range_records.append({
-                            "row": i,
-                            "column": column,
-                            "value": value,
-                            "reason": f"大于最大值 {max_value}"
-                        })
+            if field_name in record:
+                value = record[field_name]
+                # 支持 int, float, Decimal 类型的数值比较
+                if isinstance(value, (int, float)) or hasattr(value, '__float__'):
+                    try:
+                        # 统一转换为 float 进行比较
+                        numeric_value = float(value)
+                        if min_value is not None and numeric_value < min_value:
+                            out_of_range_records.append({
+                                "row": i,
+                                "field": field_name,
+                                "value": numeric_value,
+                                "reason": f"小于最小值 {min_value}"
+                            })
+                        elif max_value is not None and numeric_value > max_value:
+                            out_of_range_records.append({
+                                "row": i,
+                                "field": field_name,
+                                "value": numeric_value,
+                                "reason": f"大于最大值 {max_value}"
+                            })
+                    except (ValueError, TypeError):
+                        # 如果无法转换为数值，跳过该记录
+                        self.log_warning(f"无法将值 {value} 转换为数值进行范围检查")
+                        continue
         
         if out_of_range_records:
             return {
                 "passed": False,
-                "message": f"发现 {len(out_of_range_records)} 个超出范围的值",
+                "message": f"发现 {len(out_of_range_records)} 个超出范围的值: {assertion.get('message', '')}",
                 "details": {"out_of_range_records": out_of_range_records[:10]}
             }
         
-        return {"passed": True, "message": f"范围检查通过，列 {column}"}
+        return {"passed": True, "message": f"范围检查通过，字段 {field_name}"}
     
     def _assert_regex(self, data: List[Dict[str, Any]], assertion: Dict[str, Any]) -> Dict[str, Any]:
         """断言正则表达式匹配"""

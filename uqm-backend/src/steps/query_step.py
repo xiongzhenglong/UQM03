@@ -149,23 +149,28 @@ class QueryStep(BaseStep):
             limit = self.config.get("limit")
             offset = self.config.get("offset")
             
+            # 如果有JOIN，需要处理字段歧义问题
+            has_joins = joins and len(joins) > 0
+            
             # 构建SELECT子句
             select_fields = []
             
             # 添加维度字段
             for dim in dimensions:
                 if isinstance(dim, str):
-                    select_fields.append(dim)
+                    field_name = self._resolve_field_name(dim, data_source, has_joins)
+                    select_fields.append(field_name)
                 elif isinstance(dim, dict):
-                    field_expr = self._build_field_expression(dim)
+                    field_expr = self._build_field_expression(dim, data_source, has_joins)
                     select_fields.append(field_expr)
             
             # 添加指标字段
             for metric in metrics:
                 if isinstance(metric, str):
-                    select_fields.append(metric)
+                    field_name = self._resolve_field_name(metric, data_source, has_joins)
+                    select_fields.append(field_name)
                 elif isinstance(metric, dict):
-                    metric_expr = self._build_metric_expression(metric)
+                    metric_expr = self._build_metric_expression(metric, data_source, has_joins)
                     select_fields.append(metric_expr)
             
             # 添加计算字段
@@ -177,13 +182,22 @@ class QueryStep(BaseStep):
             if not select_fields:
                 select_fields = ["*"]
             
+            # 处理GROUP BY字段的歧义
+            resolved_group_by = []
+            for field in group_by:
+                if isinstance(field, str):
+                    resolved_field = self._resolve_field_name(field, data_source, has_joins)
+                    resolved_group_by.append(resolved_field)
+                else:
+                    resolved_group_by.append(field)
+            
             # 使用SQL构建器构建查询
             query = self.sql_builder.build_select_query(
                 select_fields=select_fields,
                 from_table=data_source,
                 joins=joins,
                 where_conditions=filters,
-                group_by=group_by,
+                group_by=resolved_group_by,
                 having=having,
                 order_by=order_by,
                 limit=limit,
@@ -197,12 +211,14 @@ class QueryStep(BaseStep):
             self.log_error("构建SQL查询失败", error=str(e))
             raise ValidationError(f"构建查询失败: {e}")
     
-    def _build_field_expression(self, field_config: Dict[str, Any]) -> str:
+    def _build_field_expression(self, field_config: Dict[str, Any], main_table: str = None, has_joins: bool = False) -> str:
         """
         构建字段表达式
         
         Args:
             field_config: 字段配置
+            main_table: 主表名
+            has_joins: 是否有JOIN
             
         Returns:
             字段表达式
@@ -215,8 +231,9 @@ class QueryStep(BaseStep):
             # 使用自定义表达式
             result = expression
         elif name:
-            # 使用字段名
-            result = name
+            # 使用字段名，处理歧义
+            resolved_name = self._resolve_field_name(name, main_table, has_joins) if main_table else name
+            result = resolved_name
         else:
             raise ValidationError("字段配置必须包含name或expression")
         
@@ -226,12 +243,14 @@ class QueryStep(BaseStep):
         
         return result
     
-    def _build_metric_expression(self, metric_config: Dict[str, Any]) -> str:
+    def _build_metric_expression(self, metric_config: Dict[str, Any], main_table: str = None, has_joins: bool = False) -> str:
         """
         构建指标表达式
         
         Args:
             metric_config: 指标配置
+            main_table: 主表名
+            has_joins: 是否有JOIN
             
         Returns:
             指标表达式
@@ -245,8 +264,9 @@ class QueryStep(BaseStep):
             # 使用自定义表达式
             result = expression
         elif name:
-            # 使用聚合函数
-            result = f"{agg_function}({name})"
+            # 使用聚合函数，处理字段名歧义
+            resolved_name = self._resolve_field_name(name, main_table, has_joins) if main_table else name
+            result = f"{agg_function}({resolved_name})"
         else:
             raise ValidationError("指标配置必须包含name或expression")
         
@@ -266,14 +286,19 @@ class QueryStep(BaseStep):
         Returns:
             计算字段表达式
         """
-        alias = calc_config.get("alias")
         expression = calc_config.get("expression")
+        alias = calc_config.get("alias")
+        name = calc_config.get("name")
         
         if not expression:
             raise ValidationError("计算字段必须包含expression")
         
+        # 如果没有alias，使用name作为别名
         if not alias:
-            raise ValidationError("计算字段必须包含alias")
+            if name:
+                alias = name
+            else:
+                raise ValidationError("计算字段必须包含alias或name")
         
         return f"{expression} AS {alias}"
     
@@ -1106,3 +1131,26 @@ class QueryStep(BaseStep):
         except Exception as e:
             self.log_warning(f"窗口函数计算失败: {e}")
             return None
+    
+    def _resolve_field_name(self, field_name: str, main_table: str, has_joins: bool) -> str:
+        """
+        解决字段名歧义问题
+        
+        Args:
+            field_name: 字段名
+            main_table: 主表名
+            has_joins: 是否有JOIN
+            
+        Returns:
+            解决歧义后的字段名
+        """
+        # 如果没有JOIN，直接返回原字段名
+        if not has_joins:
+            return field_name
+        
+        # 如果字段名已经包含表前缀，直接返回
+        if "." in field_name:
+            return field_name
+        
+        # 为字段名添加主表前缀
+        return f"{main_table}.{field_name}"
