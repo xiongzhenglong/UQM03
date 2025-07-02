@@ -528,17 +528,17 @@
         "assertions": [
           {
             "type": "custom",
-            "condition": "null_email_count == 0",
+            "expression": "null_email_count == 0",
             "message": "发现客户邮箱字段为空"
           },
           {
             "type": "custom",
-            "condition": "null_name_count == 0", 
+            "expression": "null_name_count == 0", 
             "message": "发现客户姓名字段为空"
           },
           {
             "type": "custom",
-            "condition": "invalid_email_count == 0",
+            "expression": "invalid_email_count == 0",
             "message": "发现无效的邮箱格式"
           }
         ]
@@ -612,7 +612,7 @@
         "assertions": [
           {
             "type": "custom",
-            "condition": "future_orders_count == 0",
+            "expression": "future_orders_count == 0",
             "message": "发现订单日期为未来时间的异常数据"
           }
         ]
@@ -630,7 +630,7 @@
 
 ### 5.1 验证查询性能
 
-**场景描述**: 验证关键查询的执行性能
+**场景描述**: 验证关键查询的执行性能和结果合理性
 
 ```json
 {
@@ -666,6 +666,10 @@
           {
             "name": "total_spent",
             "expression": "SUM(orders.shipping_fee)"
+          },
+          {
+            "name": "avg_order_value",
+            "expression": "AVG(orders.shipping_fee)"
           }
         ],
         "group_by": ["orders.customer_id"],
@@ -675,24 +679,37 @@
             "direction": "DESC"
           }
         ],
-        "limit": 1000
+        "limit": 1000,
+        "timeout": 30000
       }
     },
     {
-      "name": "assert_performance",
+      "name": "assert_query_results",
       "type": "assert",
       "config": {
         "source": "performance_test_query",
         "assertions": [
           {
-            "type": "custom",
-            "condition": "execution_time <= 5000",
-            "message": "查询执行时间超过5秒，需要优化"
+            "type": "row_count",
+            "max": 1000,
+            "message": "查询结果超过预期限制"
           },
           {
             "type": "custom",
-            "condition": "memory_usage <= 100",
-            "message": "查询内存使用超过100MB"
+            "expression": "order_count > 0",
+            "message": "发现客户订单数量为零的异常数据"
+          },
+          {
+            "type": "custom",
+            "expression": "total_spent > 0",
+            "message": "发现客户总消费为零的异常数据"
+          },
+          {
+            "type": "range",
+            "field": "avg_order_value",
+            "min": 0.01,
+            "max": 100000,
+            "message": "平均订单金额超出合理范围"
           }
         ]
       }
@@ -701,9 +718,14 @@
   "output": "performance_test_query"
   },
   "parameters": {},
-  "options": {}
+  "options": {
+    "query_timeout": 30000,
+    "performance_monitoring": true
+  }
 }
 ```
+
+
 
 ## 六、综合验证场景
 
@@ -913,7 +935,7 @@
 ```json
 {
   "type": "custom",
-  "condition": "revenue > 1000 AND profit_margin > 0.1",
+  "expression": "revenue > 1000 AND profit_margin > 0.1",
   "message": "收入应大于1000且利润率大于10%"
 }
 ```

@@ -156,7 +156,12 @@ class SQLBuilder(LoggerMixin):
         if not conditions:
             return ""
         
-        return f"WHERE {' AND '.join(conditions)}"
+        # 如果只有一个条件，直接使用
+        if len(conditions) == 1:
+            return f"WHERE {conditions[0]}"
+        
+        # 多个条件用AND连接
+        return f"WHERE ({') AND ('.join(conditions)})"
     
     def _build_group_by_clause(self, group_by: List[str]) -> str:
         """构建GROUP BY子句"""
@@ -244,11 +249,16 @@ class SQLBuilder(LoggerMixin):
         return ""
     
     def _build_condition(self, condition: Union[str, Dict[str, Any]]) -> str:
-        """构建条件表达式"""
+        """构建条件表达式（支持嵌套逻辑）"""
         if isinstance(condition, str):
             return condition
         
         elif isinstance(condition, dict):
+            # 检查是否是嵌套逻辑结构
+            if "logic" in condition and "conditions" in condition:
+                return self._build_logical_condition(condition)
+            
+            # 处理简单条件
             field = condition.get("field")
             operator = condition.get("operator", "=")
             value = condition.get("value")
@@ -264,8 +274,17 @@ class SQLBuilder(LoggerMixin):
                 else:
                     return f"{field} IN ({self._format_value(value)})"
             
+            elif operator.upper() == "NOT IN":
+                if isinstance(value, list):
+                    value_str = ", ".join([self._format_value(v) for v in value])
+                    return f"{field} NOT IN ({value_str})"
+                else:
+                    return f"{field} NOT IN ({self._format_value(value)})"
+            
             elif operator.upper() == "BETWEEN":
-                if isinstance(value, list) and len(value) == 2:
+                if isinstance(value, dict) and "min" in value and "max" in value:
+                    return f"{field} BETWEEN {self._format_value(value['min'])} AND {self._format_value(value['max'])}"
+                elif isinstance(value, list) and len(value) == 2:
                     return f"{field} BETWEEN {self._format_value(value[0])} AND {self._format_value(value[1])}"
             
             elif operator.upper() == "LIKE":
@@ -281,6 +300,35 @@ class SQLBuilder(LoggerMixin):
                 return f"{field} {operator} {self._format_value(value)}"
         
         return ""
+    
+    def _build_logical_condition(self, logical_condition: Dict[str, Any]) -> str:
+        """构建逻辑条件（AND/OR）"""
+        logic = logical_condition.get("logic", "AND").upper()
+        conditions = logical_condition.get("conditions", [])
+        
+        if not conditions:
+            return ""
+        
+        condition_strings = []
+        for condition in conditions:
+            condition_str = self._build_condition(condition)
+            if condition_str:
+                condition_strings.append(condition_str)
+        
+        if not condition_strings:
+            return ""
+        
+        if len(condition_strings) == 1:
+            return condition_strings[0]
+        
+        # 用括号包围逻辑条件
+        if logic == "AND":
+            return f"({' AND '.join(condition_strings)})"
+        elif logic == "OR":
+            return f"({' OR '.join(condition_strings)})"
+        else:
+            # 不支持的逻辑操作符，默认使用AND
+            return f"({' AND '.join(condition_strings)})"
     
     def _format_value(self, value: Any) -> str:
         """格式化值"""

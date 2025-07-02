@@ -42,9 +42,14 @@ class QueryStep(BaseStep):
         if not isinstance(metrics, list):
             raise ValidationError("metrics必须是数组")
         
-        # 至少需要有维度或指标
-        if not dimensions and not metrics:
-            raise ValidationError("至少需要指定dimensions或metrics")
+        # 验证计算字段
+        calculated_fields = self.config.get("calculated_fields", [])
+        if not isinstance(calculated_fields, list):
+            raise ValidationError("calculated_fields必须是数组")
+        
+        # 至少需要有维度、指标或计算字段之一
+        if not dimensions and not metrics and not calculated_fields:
+            raise ValidationError("至少需要指定dimensions、metrics或calculated_fields之一")
     
     async def execute(self, context: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
@@ -419,15 +424,57 @@ class QueryStep(BaseStep):
     
     def _evaluate_filters(self, row: Dict[str, Any], filters: List[Dict[str, Any]]) -> bool:
         """评估过滤条件"""
+        if not filters:
+            return True
+        
         for filter_config in filters:
-            field = filter_config.get("field")
-            operator = filter_config.get("operator")
-            value = filter_config.get("value")
-            
-            if not self._evaluate_single_filter(row, field, operator, value):
+            if not self._evaluate_filter_condition(row, filter_config):
                 return False
         
         return True
+    
+    def _evaluate_filter_condition(self, row: Dict[str, Any], filter_config: Dict[str, Any]) -> bool:
+        """评估单个过滤条件（支持嵌套逻辑）"""
+        # 检查是否是嵌套逻辑结构
+        if "logic" in filter_config and "conditions" in filter_config:
+            return self._evaluate_logical_condition(row, filter_config)
+        
+        # 检查是否是简单过滤条件
+        elif "field" in filter_config and "operator" in filter_config:
+            field = filter_config.get("field")
+            operator = filter_config.get("operator")
+            value = filter_config.get("value")
+            return self._evaluate_single_filter(row, field, operator, value)
+        
+        else:
+            self.log_warning(f"未识别的过滤条件格式: {filter_config}")
+            return True
+    
+    def _evaluate_logical_condition(self, row: Dict[str, Any], logical_config: Dict[str, Any]) -> bool:
+        """评估逻辑条件（AND/OR）"""
+        logic = logical_config.get("logic", "AND").upper()
+        conditions = logical_config.get("conditions", [])
+        
+        if not conditions:
+            return True
+        
+        if logic == "AND":
+            # 所有条件都必须为真
+            for condition in conditions:
+                if not self._evaluate_filter_condition(row, condition):
+                    return False
+            return True
+        
+        elif logic == "OR":
+            # 至少一个条件为真
+            for condition in conditions:
+                if self._evaluate_filter_condition(row, condition):
+                    return True
+            return False
+        
+        else:
+            self.log_warning(f"不支持的逻辑操作符: {logic}")
+            return True
     
     def _evaluate_single_filter(self, row: Dict[str, Any], field: str, operator: str, value: Any) -> bool:
         """评估单个过滤条件"""

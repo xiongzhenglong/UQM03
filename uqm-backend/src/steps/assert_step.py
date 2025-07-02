@@ -160,27 +160,31 @@ class AssertStep(BaseStep):
         expected_count = assertion.get("expected")
         min_count = assertion.get("min")
         max_count = assertion.get("max")
+        custom_message = assertion.get("message")
         
         actual_count = len(data)
         
         if expected_count is not None and actual_count != expected_count:
+            message = custom_message or f"期望行数 {expected_count}，实际行数 {actual_count}"
             return {
                 "passed": False,
-                "message": f"期望行数 {expected_count}，实际行数 {actual_count}",
+                "message": message,
                 "details": {"expected": expected_count, "actual": actual_count}
             }
         
         if min_count is not None and actual_count < min_count:
+            message = custom_message or f"行数少于最小值 {min_count}，实际行数 {actual_count}"
             return {
                 "passed": False,
-                "message": f"行数少于最小值 {min_count}，实际行数 {actual_count}",
+                "message": message,
                 "details": {"min": min_count, "actual": actual_count}
             }
         
         if max_count is not None and actual_count > max_count:
+            message = custom_message or f"行数超过最大值 {max_count}，实际行数 {actual_count}"
             return {
                 "passed": False,
-                "message": f"行数超过最大值 {max_count}，实际行数 {actual_count}",
+                "message": message,
                 "details": {"max": max_count, "actual": actual_count}
             }
         
@@ -244,6 +248,7 @@ class AssertStep(BaseStep):
         field_name = assertion.get("field") or assertion.get("column")
         min_value = assertion.get("min")
         max_value = assertion.get("max")
+        custom_message = assertion.get("message", f"字段 {field_name} 超出范围")
         
         if not field_name:
             return {"passed": False, "message": "缺少 field 或 column 参数"}
@@ -280,7 +285,7 @@ class AssertStep(BaseStep):
         if out_of_range_records:
             return {
                 "passed": False,
-                "message": f"发现 {len(out_of_range_records)} 个超出范围的值: {assertion.get('message', '')}",
+                "message": custom_message,
                 "details": {"out_of_range_records": out_of_range_records[:10]}
             }
         
@@ -323,6 +328,7 @@ class AssertStep(BaseStep):
     def _assert_custom(self, data: List[Dict[str, Any]], assertion: Dict[str, Any]) -> Dict[str, Any]:
         """自定义断言"""
         expression = assertion.get("expression")
+        custom_message = assertion.get("message", "自定义断言失败")
         
         if not expression:
             return {"passed": False, "message": "缺少expression参数"}
@@ -344,8 +350,8 @@ class AssertStep(BaseStep):
             if failed_rows:
                 return {
                     "passed": False,
-                    "message": f"自定义断言失败，{len(failed_rows)} 行不满足条件",
-                    "details": {"failed_rows": failed_rows[:10]}
+                    "message": custom_message,
+                    "details": {"failed_rows": failed_rows[:10], "expression": expression}
                 }
             
             return {"passed": True, "message": "自定义断言通过"}
