@@ -191,7 +191,9 @@ class UQMEngine(LoggerMixin):
             
             # 替换参数
             for param_name, param_value in parameters.items():
-                placeholder = f"${param_name}"
+                # 支持两种格式：${param_name} 和 $param_name
+                placeholder_with_braces = f"${{{param_name}}}"
+                placeholder_without_braces = f"${param_name}"
                 
                 # 根据参数值类型进行替换
                 if isinstance(param_value, str):
@@ -201,10 +203,17 @@ class UQMEngine(LoggerMixin):
                 else:
                     replacement = json.dumps(param_value, ensure_ascii=False)
                 
+                # 先处理带大括号的格式 ${param_name}
                 # 先处理带引号的占位符（用于字符串值）
-                data_str = data_str.replace(f'"{placeholder}"', replacement)
+                data_str = data_str.replace(f'"{placeholder_with_braces}"', replacement)
                 # 再处理不带引号的占位符（用于非字符串值）
-                data_str = data_str.replace(placeholder, replacement)
+                data_str = data_str.replace(placeholder_with_braces, replacement)
+                
+                # 再处理不带大括号的格式 $param_name
+                # 先处理带引号的占位符（用于字符串值）
+                data_str = data_str.replace(f'"{placeholder_without_braces}"', replacement)
+                # 再处理不带引号的占位符（用于非字符串值）
+                data_str = data_str.replace(placeholder_without_braces, replacement)
             
             # 转换回字典
             processed_data = json.loads(data_str)
