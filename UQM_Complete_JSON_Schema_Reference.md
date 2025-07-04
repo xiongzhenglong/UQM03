@@ -117,12 +117,16 @@ Steps 是 UQM 的核心，定义了数据处理的步骤序列。每个步骤都
         "alias": "alias_name"
       }
     ],
+    // ⚠️ 重要限制：metrics 中定义的聚合结果字段不能在同一步骤的 filters 中直接使用
+    // 如需根据聚合结果过滤，请使用 having 条件或多步骤查询
     "calculated_fields": [                // 可选：计算字段
       {
         "alias": "field_name",
         "expression": "SQL_expression"
       }
     ],
+    // ⚠️ 重要限制：calculated_fields 中定义的字段别名不能在同一步骤的 filters 中直接使用
+    // 如需根据计算字段过滤，请使用多步骤查询：先计算字段，再在下一步骤中过滤
     "filters": [                          // 可选：过滤条件
       {
         "field": "field_name",
@@ -134,6 +138,11 @@ Steps 是 UQM 的核心，定义了数据处理的步骤序列。每个步骤都
         }
       }
     ],
+    // ⚠️ filters 字段限制说明：
+    // 1. field 只能引用 data_source 中的原始字段、dimensions 中的字段或别名
+    // 2. 不能直接引用 calculated_fields 中定义的字段别名
+    // 3. 不能引用 metrics 中定义的聚合结果字段
+    // 4. 如需根据计算字段或聚合结果过滤，请使用多步骤查询
     "joins": [                            // 可选：表连接
       {
         "type": "JOIN_TYPE",              // INNER/LEFT/RIGHT/FULL
@@ -149,6 +158,8 @@ Steps 是 UQM 的核心，定义了数据处理的步骤序列。每个步骤都
         "value": "value"
       }
     ],
+    // ✅ having 是对聚合结果进行过滤的正确方式
+    // 可以在 having 中使用 metrics 中定义的聚合字段别名
     "order_by": [                         // 可选：排序
       {
         "field": "field_name",
@@ -177,6 +188,122 @@ Steps 是 UQM 的核心，定义了数据处理的步骤序列。每个步骤都
 - `group_by` 中的字段名必须是 `dimensions` 中定义的字段名或别名
 - 如果使用了 `joins`，确保分组字段在连接后的结果集中存在
 - 表别名必须与 `data_source` 和 `joins` 中定义的保持一致
+- **⚠️ 表别名规则**：在 `metrics` 中使用 `name` 字段时，必须包含正确的表别名前缀（如 `oi.quantity` 而不是 `quantity`）
+- **⚠️ 表别名规则**：使用表别名时，所有字段引用都必须使用完整的表别名前缀
+- **⚠️ 核心限制**：在 `calculated_fields` 中定义的字段别名**不能**在同一步骤的 `filters` 中直接使用
+- **⚠️ 核心限制**：在 `metrics` 中定义的聚合结果字段**不能**在同一步骤的 `filters` 中直接使用
+- **⚠️ 输出规则**：作为最终输出的步骤必须明确定义 `dimensions`、`metrics` 或 `calculated_fields`，不能只有 `filters` 而没有字段定义
+- **解决方案**：如需根据计算字段或聚合结果过滤，必须使用多步骤查询：先计算/聚合，再在下一步骤中过滤
+
+**字段引用限制示例：**
+
+❌ **错误：直接在 filters 中引用 calculated_fields**
+```json
+{
+  "type": "query",
+  "config": {
+    "data_source": "sales_data",
+    "calculated_fields": [
+      {
+        "alias": "sales_rank",
+        "expression": "ROW_NUMBER() OVER (ORDER BY total_sales DESC)"
+      }
+    ],
+    "filters": [
+      {
+        "field": "sales_rank",  // ❌ 错误：不能直接引用同一步骤的计算字段
+        "operator": "=",
+        "value": 1
+      }
+    ]
+  }
+}
+```
+
+❌ **错误：直接在 filters 中引用 metrics**
+```json
+{
+  "type": "query",
+  "config": {
+    "data_source": "sales_data",
+    "metrics": [
+      {
+        "name": "total_sales",
+        "aggregation": "SUM",
+        "alias": "sum_sales"
+      }
+    ],
+    "filters": [
+      {
+        "field": "sum_sales",  // ❌ 错误：不能在 filters 中引用聚合结果
+        "operator": ">",
+        "value": 1000
+      }
+    ],
+    "group_by": ["product_category"]
+  }
+}
+```
+
+✅ **正确：使用多步骤查询**
+```json
+{
+  "steps": [
+    {
+      "name": "calculate_rankings",
+      "type": "query",
+      "config": {
+        "data_source": "sales_data",
+        "calculated_fields": [
+          {
+            "alias": "sales_rank",
+            "expression": "ROW_NUMBER() OVER (ORDER BY total_sales DESC)"
+          }
+        ]
+      }
+    },
+    {
+      "name": "filter_top_results",
+      "type": "query",
+      "config": {
+        "data_source": "calculate_rankings",
+        "filters": [
+          {
+            "field": "sales_rank",  // ✅ 正确：引用前一步骤的字段
+            "operator": "=",
+            "value": 1
+          }
+        ]
+      }
+    }
+  ]
+}
+```
+
+✅ **正确：对聚合结果使用 having 条件**
+```json
+{
+  "type": "query",
+  "config": {
+    "data_source": "sales_data",
+    "metrics": [
+      {
+        "name": "total_sales",
+        "aggregation": "SUM",
+        "alias": "sum_sales"
+      }
+    ],
+    "group_by": ["product_category"],
+    "having": [
+      {
+        "field": "sum_sales",  // ✅ 正确：在 having 中使用聚合结果
+        "operator": ">",
+        "value": 1000
+      }
+    ]
+  }
+}
+```
 
 **示例：**
 ```json
@@ -949,10 +1076,268 @@ Steps 是 UQM 的核心，定义了数据处理的步骤序列。每个步骤都
 - 确保所有字段引用使用正确的表别名或字段名
 - 验证 `group_by` 中的字段在 `dimensions` 中已定义
 
-### 4. 可维护性
-- 添加详细的元数据描述
-- 使用参数化查询提高灵活性
-- 分解复杂查询为多个步骤
+### 4. 计算字段和过滤器的使用
+- **重要规则**：不能在同一个查询步骤的 `filters` 中直接使用 `calculated_fields` 中定义的别名
+- **解决方案**：使用多步骤查询来处理基于计算字段的过滤
+  - 第一步：定义计算字段
+  - 第二步：使用计算字段进行过滤
+- **示例场景**：需要根据排名、百分比等计算结果进行过滤时
+
+### 5. 表别名和字段引用
+- 当使用表别名时，所有字段引用必须使用完整的表别名前缀
+- 在 `metrics` 的 `name` 字段中，必须包含表别名（如 `"name": "oi.quantity"`）
+- 在 `dimensions` 中可以使用 `"p.category"` 或 `{"expression": "p.category", "alias": "category"}`
+- 确保表别名在整个查询中保持一致
+
+### 6. 多步骤查询的字段延续关系
+- **重要概念**：步骤之间存在字段延续关系，前一步骤的输出字段可以被后续步骤引用
+- **输出步骤规则**：`output` 指定的最终输出步骤必须明确定义要输出的字段
+- **字段定义要求**：最终输出步骤应包含 `dimensions`、`metrics` 或 `calculated_fields` 来明确字段结构
+- **⚠️ 常见错误**：最终输出步骤只有 `filters` 而缺少字段定义，导致输出结果不明确
+- **实践建议**：确保最终输出步骤包含所有需要的字段，避免字段丢失
+
+**❌ 错误：最终输出步骤缺少字段定义**
+```json
+{
+  "steps": [
+    {
+      "name": "calculate_data",
+      "type": "query",
+      "config": {
+        "data_source": "sales_data",
+        "dimensions": ["category"],
+        "calculated_fields": [
+          {
+            "alias": "category_rank",
+            "expression": "ROW_NUMBER() OVER (ORDER BY total_sales DESC)"
+          }
+        ]
+      }
+    },
+    {
+      "name": "filter_results",
+      "type": "query",
+      "config": {
+        "data_source": "calculate_data",
+        "filters": [
+          {
+            "field": "category_rank",
+            "operator": "<=",
+            "value": 5
+          }
+        ]
+        // ❌ 错误：没有定义输出字段，不知道输出什么
+      }
+    }
+  ],
+  "output": "filter_results"
+}
+```
+
+**✅ 正确：最终输出步骤包含完整字段定义**
+```json
+{
+  "steps": [
+    {
+      "name": "calculate_data",
+      "type": "query",
+      "config": {
+        "data_source": "sales_data",
+        "dimensions": ["category"],
+        "metrics": [
+          {
+            "name": "total_sales",
+            "aggregation": "SUM",
+            "alias": "total_sales"
+          }
+        ],
+        "calculated_fields": [
+          {
+            "alias": "category_rank",
+            "expression": "ROW_NUMBER() OVER (ORDER BY total_sales DESC)"
+          }
+        ]
+      }
+    },
+    {
+      "name": "filter_results",
+      "type": "query",
+      "config": {
+        "data_source": "calculate_data",
+        "dimensions": ["category"],
+        "metrics": [
+          {
+            "name": "total_sales",
+            "aggregation": "SUM",
+            "alias": "total_sales"
+          }
+        ],
+        "calculated_fields": [
+          {
+            "alias": "category_rank",
+            "expression": "category_rank"
+          }
+        ],
+        "filters": [
+          {
+            "field": "category_rank",
+            "operator": "<=",
+            "value": 5
+          }
+        ]
+        // ✅ 正确：明确定义了输出的所有字段
+      }
+    }
+  ],
+  "output": "filter_results"
+}
+```
+
+**错误示例：**
+```json
+{
+  "name": "wrong_example",
+  "type": "query",
+  "config": {
+    "data_source": "sales_data",
+    "calculated_fields": [
+      {
+        "alias": "sales_rank",
+        "expression": "ROW_NUMBER() OVER (ORDER BY total_sales DESC)"
+      }
+    ],
+    "filters": [
+      {
+        "field": "sales_rank",  // 错误：不能直接引用计算字段
+        "operator": "=",
+        "value": 1
+      }
+    ]
+  }
+}
+```
+
+**正确示例：**
+```json
+{
+  "steps": [
+    {
+      "name": "calculate_rankings",
+      "type": "query",
+      "config": {
+        "data_source": "sales_data",
+        "dimensions": [
+          "product_category"
+        ],
+        "metrics": [
+          {
+            "name": "total_sales",
+            "aggregation": "SUM",
+            "alias": "total_sales"
+          }
+        ],
+        "calculated_fields": [
+          {
+            "alias": "sales_rank",
+            "expression": "ROW_NUMBER() OVER (ORDER BY total_sales DESC)"
+          }
+        ],
+        "group_by": ["product_category"]
+      }
+    },
+    {
+      "name": "filter_top_results",
+      "type": "query",
+      "config": {
+        "data_source": "calculate_rankings",
+        "dimensions": [
+          "product_category"
+        ],
+        "metrics": [
+          {
+            "name": "total_sales",
+            "aggregation": "SUM",
+            "alias": "total_sales"
+          }
+        ],
+        "calculated_fields": [
+          {
+            "alias": "sales_rank",
+            "expression": "sales_rank"
+          }
+        ],
+        "filters": [
+          {
+            "field": "sales_rank",  // ✅ 正确：引用前一步骤的字段
+            "operator": "<=",
+            "value": 5
+          }
+        ],
+        "order_by": [
+          {
+            "field": "sales_rank",
+            "direction": "ASC"
+          }
+        ]
+      }
+    }
+  ],
+  "output": "filter_top_results"  // ✅ 最终输出步骤包含完整字段定义
+}
+```
+
+**表别名和最终输出步骤示例：**
+```json
+{
+  "steps": [
+    {
+      "name": "get_sales_by_category",
+      "type": "query",
+      "config": {
+        "data_source": "order_items oi",
+        "dimensions": ["p.category"],
+        "metrics": [
+          {
+            "name": "oi.quantity",  // ✅ 正确：使用表别名前缀
+            "aggregation": "SUM",
+            "alias": "total_quantity"
+          }
+        ],
+        "joins": [
+          {
+            "type": "INNER",
+            "table": "products p",
+            "on": "oi.product_id = p.product_id"
+          }
+        ],
+        "group_by": ["p.category"]
+      }
+    },
+    {
+      "name": "final_output",
+      "type": "query",
+      "config": {
+        "data_source": "get_sales_by_category",
+        "dimensions": ["category"],  // ✅ 正确：最终输出步骤明确定义字段
+        "metrics": [
+          {
+            "name": "total_quantity",
+            "aggregation": "SUM",
+            "alias": "total_quantity"
+          }
+        ],
+        "calculated_fields": [
+          {
+            "alias": "category_rank",
+            "expression": "ROW_NUMBER() OVER (ORDER BY total_quantity DESC)"
+          }
+        ]
+      }
+    }
+  ],
+  "output": "final_output"  // ✅ 最终输出步骤包含完整字段定义
+}
+```
 
 ## 🔍 调试技巧
 

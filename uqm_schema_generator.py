@@ -48,7 +48,7 @@ class UQMSchemaGenerator:
             os.makedirs(self.output_dir)
             
         # Load guide and schema docs
-        self.guide_content = self._load_file("UQM_Complete_JSON_Schema_Reference.md")
+        self.guide_content = self._load_file("UQM_Technical_Schema_Specification.md")
         self.schema_content = self._load_file("数据库表结构简化描述.md")
         
     def _load_file(self, filename: str) -> str:
@@ -340,7 +340,7 @@ def main():
     """Main function to run the UQM Schema Generator"""
     
     # Configuration
-    OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY") or "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"
+    OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY") or "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"
     if not OPENROUTER_API_KEY:
         print("Error: OPENROUTER_API_KEY environment variable not set")
         print("Please set it with: $env:OPENROUTER_API_KEY='your_api_key'")

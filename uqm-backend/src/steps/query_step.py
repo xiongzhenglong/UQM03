@@ -81,14 +81,19 @@ class QueryStep(BaseStep):
         检查数据源是否是步骤数据
         
         Args:
-            data_source: 数据源名称
+            data_source: 数据源名称（可能包含别名，如 "step_name alias"）
             context: 执行上下文
             
         Returns:
             是否是步骤数据源
         """
         step_data = context.get("step_data", {})
-        return data_source in step_data
+        
+        # 处理带别名的步骤引用，如 "latest_order_date lod"
+        # 提取步骤名称（第一个单词）
+        step_name = data_source.split()[0]
+        
+        return step_name in step_data
     
     async def _execute_with_step_data(self, context: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
@@ -103,8 +108,12 @@ class QueryStep(BaseStep):
         data_source = self.config["data_source"]
         get_source_data = context["get_source_data"]
         
+        # 处理带别名的步骤引用，如 "latest_order_date lod"
+        # 提取步骤名称（第一个单词）
+        step_name = data_source.split()[0]
+        
         # 获取源数据
-        source_data = get_source_data(data_source)
+        source_data = get_source_data(step_name)
         
         # 对源数据进行处理
         result = self._process_step_data(source_data)
@@ -480,22 +489,25 @@ class QueryStep(BaseStep):
         """评估单个过滤条件"""
         row_value = row.get(field)
         
+        # 如果过滤值是SQL表达式，先计算它
+        computed_value = self._compute_filter_value(value)
+        
         if operator == "=":
-            return row_value == value
+            return row_value == computed_value
         elif operator == "!=":
-            return row_value != value
+            return row_value != computed_value
         elif operator == ">":
-            return row_value is not None and row_value > value
+            return row_value is not None and self._compare_values(row_value, computed_value, ">")
         elif operator == ">=":
-            return row_value is not None and row_value >= value
+            return row_value is not None and self._compare_values(row_value, computed_value, ">=")
         elif operator == "<":
-            return row_value is not None and row_value < value
+            return row_value is not None and self._compare_values(row_value, computed_value, "<")
         elif operator == "<=":
-            return row_value is not None and row_value <= value
+            return row_value is not None and self._compare_values(row_value, computed_value, "<=")
         elif operator == "IN":
-            return row_value in value if isinstance(value, list) else False
+            return row_value in computed_value if isinstance(computed_value, list) else False
         elif operator == "NOT IN":
-            return row_value not in value if isinstance(value, list) else True
+            return row_value not in computed_value if isinstance(computed_value, list) else True
         elif operator == "IS NULL":
             return row_value is None
         elif operator == "IS NOT NULL":
@@ -503,10 +515,117 @@ class QueryStep(BaseStep):
         elif operator == "LIKE":
             if row_value is None:
                 return False
-            return str(value).replace("%", ".*").replace("_", ".") in str(row_value)
+            return str(computed_value).replace("%", ".*").replace("_", ".") in str(row_value)
         else:
             self.log_warning(f"不支持的过滤操作符: {operator}")
             return True
+    
+    def _compute_filter_value(self, value: Any) -> Any:
+        """计算过滤值，支持SQL表达式"""
+        if not isinstance(value, str):
+            return value
+        
+        # 检查是否是日期函数表达式
+        if "DATE_SUB" in value.upper() or "CURDATE" in value.upper() or "CURRENT_DATE" in value.upper():
+            return self._evaluate_date_expression(value)
+        
+        # 检查是否是其他SQL函数表达式
+        if any(func in value.upper() for func in ["NOW()", "CURRENT_TIMESTAMP", "UNIX_TIMESTAMP"]):
+            return self._evaluate_date_expression(value)
+        
+        return value
+    
+    def _evaluate_date_expression(self, expression: str) -> Any:
+        """计算日期表达式"""
+        from datetime import datetime, timedelta
+        import re
+        
+        # 处理 DATE_SUB(CURDATE(), INTERVAL n MONTH/DAY/YEAR)
+        if "DATE_SUB" in expression.upper():
+            # 提取间隔信息
+            interval_match = re.search(r'INTERVAL\s+(\d+)\s+(MONTH|DAY|YEAR)', expression.upper())
+            if interval_match:
+                interval_value = int(interval_match.group(1))
+                interval_unit = interval_match.group(2)
+                
+                current_date = datetime.now().date()
+                
+                if interval_unit == "MONTH":
+                    # 近似计算月份减法
+                    year = current_date.year
+                    month = current_date.month - interval_value
+                    if month <= 0:
+                        year -= abs(month) // 12 + 1
+                        month = 12 + month % 12
+                    result_date = current_date.replace(year=year, month=month)
+                elif interval_unit == "DAY":
+                    result_date = current_date - timedelta(days=interval_value)
+                elif interval_unit == "YEAR":
+                    result_date = current_date.replace(year=current_date.year - interval_value)
+                
+                return result_date.strftime("%Y-%m-%d")
+        
+        # 处理 CURDATE() 或 CURRENT_DATE()
+        if "CURDATE" in expression.upper() or "CURRENT_DATE" in expression.upper():
+            return datetime.now().date().strftime("%Y-%m-%d")
+        
+        # 如果无法解析，返回原值
+        return expression
+    
+    def _compare_values(self, val1: Any, val2: Any, operator: str) -> bool:
+        """比较两个值，支持日期比较"""
+        # 尝试日期比较
+        try:
+            from datetime import datetime
+            
+            # 尝试解析为日期
+            if isinstance(val1, str) and isinstance(val2, str):
+                # 尝试多种日期格式
+                date_formats = ["%Y-%m-%d", "%Y-%m-%d %H:%M:%S", "%Y/%m/%d", "%m/%d/%Y"]
+                
+                date1 = None
+                date2 = None
+                
+                for fmt in date_formats:
+                    try:
+                        date1 = datetime.strptime(val1, fmt)
+                        break
+                    except:
+                        continue
+                
+                for fmt in date_formats:
+                    try:
+                        date2 = datetime.strptime(val2, fmt)
+                        break
+                    except:
+                        continue
+                
+                if date1 and date2:
+                    if operator == ">":
+                        return date1 > date2
+                    elif operator == ">=":
+                        return date1 >= date2
+                    elif operator == "<":
+                        return date1 < date2
+                    elif operator == "<=":
+                        return date1 <= date2
+        except:
+            pass
+        
+        # 回退到基本比较
+        try:
+            if operator == ">":
+                return val1 > val2
+            elif operator == ">=":
+                return val1 >= val2
+            elif operator == "<":
+                return val1 < val2
+            elif operator == "<=":
+                return val1 <= val2
+        except:
+            return False
+        
+        return False
     
     def _is_aggregation_metric(self, metric: Union[str, Dict[str, Any]]) -> bool:
         """检查是否是聚合指标"""
