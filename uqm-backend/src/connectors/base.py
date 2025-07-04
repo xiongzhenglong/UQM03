@@ -228,14 +228,20 @@ class DefaultConnectorManager(BaseConnectorManager):
         Returns:
             默认连接器实例
         """
-        # 优先级：PostgreSQL > MySQL > SQLite
+        # 优先使用配置指定的默认数据库类型
+        default_type = self.settings.DEFAULT_DB_TYPE.lower()
+        connector = self.get_connector(default_type)
+        if connector:
+            if await connector.test_connection():
+                return connector
+        # fallback到原有优先级
         for connector_name in ["postgresql", "mysql", "sqlite"]:
+            if connector_name == default_type:
+                continue
             connector = self.get_connector(connector_name)
             if connector:
-                # 测试连接
                 if await connector.test_connection():
                     return connector
-        
         raise ConnectionError("没有可用的数据库连接器")
 
 

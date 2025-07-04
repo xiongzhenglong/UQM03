@@ -53,6 +53,9 @@ class Settings(BaseSettings):
     ENABLE_METRICS: bool = Field(default=True, description="是否启用指标监控")
     METRICS_PATH: str = Field(default="/metrics", description="指标接口路径")
     
+    # 新增：全局默认数据库类型
+    DEFAULT_DB_TYPE: str = Field(default="postgresql", description="全局默认数据库类型，可选：postgresql、mysql、sqlite")
+    
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

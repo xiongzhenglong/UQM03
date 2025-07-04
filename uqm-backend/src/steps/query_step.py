@@ -108,15 +108,21 @@ class QueryStep(BaseStep):
         data_source = self.config["data_source"]
         get_source_data = context["get_source_data"]
         
-        # 处理带别名的步骤引用，如 "latest_order_date lod"
+        # 处理带别名的步骤引用，如 "customer_order_counts coc"
         # 提取步骤名称（第一个单词）
         step_name = data_source.split()[0]
         
         # 获取源数据
         source_data = get_source_data(step_name)
         
-        # 对源数据进行处理
-        result = self._process_step_data(source_data)
+        # 检查是否有JOIN操作
+        joins = self.config.get("joins", [])
+        if joins:
+            # 处理JOIN操作
+            result = self._process_step_data_with_joins(source_data, joins, get_source_data)
+        else:
+            # 对源数据进行处理
+            result = self._process_step_data(source_data)
         
         return result
     
@@ -136,7 +142,7 @@ class QueryStep(BaseStep):
         # 构建SQL查询
         query = self.build_query()
         
-        # 获取默认连接器（或根据配置选择特定连接器）
+        # 只用全局默认连接器
         connector = await connector_manager.get_default_connector()
         
         # 执行查询
@@ -376,7 +382,7 @@ class QueryStep(BaseStep):
         """
         if not source_data:
             return []
-          # 获取配置
+        # 获取配置
         dimensions = self.config.get("dimensions", [])
         metrics = self.config.get("metrics", [])
         calculated_fields = self.config.get("calculated_fields", [])
@@ -386,13 +392,47 @@ class QueryStep(BaseStep):
         order_by = self.config.get("order_by", [])
         limit = self.config.get("limit")
         offset = self.config.get("offset")
-        
+
         # 如果没有任何处理配置，直接返回源数据
         if not dimensions and not metrics and not calculated_fields and not filters and not group_by and not having and not order_by and not limit:
             return source_data
 
         # 应用过滤器
         filtered_data = self._apply_filters(source_data, filters)
+
+        # 新增：如果metrics只有聚合指标且没有group_by，则全表聚合
+        if metrics and not group_by and all(self._is_aggregation_metric(metric) for metric in metrics):
+            agg_row = {}
+            metric_expr_map = {}
+            for metric in metrics:
+                if isinstance(metric, dict):
+                    field_name = metric.get("name")
+                    alias = metric.get("alias", field_name)
+                    aggregation = metric.get("aggregation", "SUM")
+                    expression = metric.get("expression")
+                    if expression:
+                        agg_row[alias] = self._aggregate_expression(expression, filtered_data)
+                        metric_expr_map[expression.strip().upper()] = alias
+                    elif field_name:
+                        agg_row[alias] = self._aggregate_field(field_name, aggregation, filtered_data)
+                        metric_expr_map[f"{aggregation}({field_name})".upper()] = alias
+            # 添加计算字段
+            if calculated_fields:
+                for calc_field in calculated_fields:
+                    alias = calc_field.get("alias")
+                    expression = calc_field.get("expression")
+                    if alias and expression:
+                        expr_key = expression.strip().upper()
+                        # 如果表达式和metrics聚合表达式一致，直接赋值
+                        if expr_key in metric_expr_map:
+                            agg_row[alias] = agg_row[metric_expr_map[expr_key]]
+                        else:
+                            try:
+                                agg_row[alias] = self._evaluate_expression_with_aggregates(expression, agg_row)
+                            except Exception as e:
+                                self.log_warning(f"全表聚合计算字段 {alias} 计算失败: {e}")
+                                agg_row[alias] = None
+            return [agg_row]
 
         # 处理分组和聚合
         if group_by or any(self._is_aggregation_metric(metric) for metric in metrics):
@@ -697,11 +737,32 @@ class QueryStep(BaseStep):
                     if alias:
                         group_by.append(alias)
         
+        # 检查是否需要分组 - 修复逻辑
+        needs_grouping = bool(group_by) or any(self._is_aggregation_metric(metric) for metric in metrics)
+        
+        if not needs_grouping:
+            # 如果不需要分组，直接选择字段
+            return self._select_fields(data, dimensions, metrics)
+        
         # 按分组字段分组
         groups = {}
         for row in data:
-            # 构建分组键
-            group_key = tuple(row.get(field, None) for field in group_by)
+            # 构建分组键 - 支持带前缀的字段名
+            group_key_values = []
+            for field in group_by:
+                # 尝试多种字段名格式
+                value = None
+                if field in row:
+                    value = row[field]
+                else:
+                    # 尝试寻找带前缀的字段名
+                    for row_key in row.keys():
+                        if row_key.endswith(f".{field}") or row_key == field:
+                            value = row[row_key]
+                            break
+                group_key_values.append(value)
+            
+            group_key = tuple(group_key_values)
             
             if group_key not in groups:
                 groups[group_key] = []
@@ -716,6 +777,25 @@ class QueryStep(BaseStep):
             for i, field in enumerate(group_by):
                 aggregated_row[field] = group_key[i]
             
+            # 添加维度字段（非聚合）
+            for dim in dimensions:
+                if isinstance(dim, str):
+                    if dim not in group_by and dim in group_rows[0]:
+                        aggregated_row[dim] = group_rows[0][dim]
+                elif isinstance(dim, dict):
+                    field_name = dim.get("name")
+                    alias = dim.get("alias", field_name)
+                    expression = dim.get("expression")
+                    
+                    if alias not in group_by:
+                        if expression:
+                            try:
+                                aggregated_row[alias] = self._evaluate_expression(expression, group_rows[0])
+                            except:
+                                aggregated_row[alias] = None
+                        elif field_name and field_name in group_rows[0]:
+                            aggregated_row[alias] = group_rows[0][field_name]
+            
             # 计算聚合指标
             for metric in metrics:
                 if isinstance(metric, dict):
@@ -725,23 +805,36 @@ class QueryStep(BaseStep):
                     expression = metric.get("expression")
                     
                     if expression:
-                        # 处理表达式聚合（简单实现）
+                        # 处理表达式聚合
                         aggregated_row[alias] = self._aggregate_expression(expression, group_rows)
                     elif field_name:
+                        # 处理带前缀的字段名
+                        actual_field_name = field_name
+                        if field_name not in group_rows[0]:
+                            # 寻找带前缀的字段名
+                            for row_key in group_rows[0].keys():
+                                if row_key.endswith(f".{field_name}") or row_key == field_name:
+                                    actual_field_name = row_key
+                                    break
+                        
                         # 标准聚合
-                        aggregated_row[alias] = self._aggregate_field(field_name, aggregation, group_rows)
+                        aggregated_row[alias] = self._aggregate_field(actual_field_name, aggregation, group_rows)
             
             result.append(aggregated_row)
         
         return result
     
     def _aggregate_field(self, field_name: str, aggregation: str, rows: List[Dict[str, Any]]) -> Any:
-        """聚合字段"""
-        values = [row.get(field_name) for row in rows if row.get(field_name) is not None]
-        
+        """聚合字段，支持字段名变体"""
+        # 支持字段名变体
+        values = []
+        for row in rows:
+            for variant in self._build_field_variants(field_name, row):
+                if variant in row and row[variant] is not None:
+                    values.append(row[variant])
+                    break
         if not values:
             return None
-        
         if aggregation == "SUM":
             return sum(float(v) for v in values if self._is_numeric(v))
         elif aggregation == "COUNT":
@@ -756,32 +849,41 @@ class QueryStep(BaseStep):
         else:
             self.log_warning(f"不支持的聚合函数: {aggregation}")
             return None
+
     def _aggregate_expression(self, expression: str, rows: List[Dict[str, Any]]) -> Any:
-        """聚合表达式（简单实现）"""
-        # 处理复杂的聚合表达式
+        """聚合表达式（支持字段名变体）"""
         import re
-        
-        # 首先尝试直接的SUM或COUNT
+        # 首先尝试直接的SUM或COUNT或AVG
         if "SUM(" in expression.upper() and "/" not in expression:
-            # 简单的SUM表达式
             match = re.search(r'SUM\(([^)]+)\)', expression, re.IGNORECASE)
             if match:
                 field_expr = match.group(1).strip()
                 total = 0
                 for row in rows:
-                    try:
-                        value = self._evaluate_expression(field_expr, row)
-                        if self._is_numeric(value):
-                            total += float(value)
-                    except:
-                        pass
+                    for variant in self._build_field_variants(field_expr, row):
+                        if variant in row and self._is_numeric(row[variant]):
+                            total += float(row[variant])
+                            break
                 return total
         elif "COUNT(" in expression.upper() and "/" not in expression:
             return len(rows)
+        elif "AVG(" in expression.upper() and "/" not in expression:
+            match = re.search(r'AVG\(([^)]+)\)', expression, re.IGNORECASE)
+            if match:
+                field_expr = match.group(1).strip()
+                values = []
+                for row in rows:
+                    for variant in self._build_field_variants(field_expr, row):
+                        if variant in row and self._is_numeric(row[variant]):
+                            values.append(float(row[variant]))
+                            break
+                if values:
+                    return sum(values) / len(values)
+                else:
+                    return None
         else:
             # 处理复杂表达式，如 SUM(field1) / COUNT(field2)
             return self._evaluate_complex_aggregate_expression(expression, rows)
-        
         return None
     
     def _evaluate_complex_aggregate_expression(self, expression: str, rows: List[Dict[str, Any]]) -> Any:
@@ -932,6 +1034,10 @@ class QueryStep(BaseStep):
         if "CASE" in expression.upper() and "WHEN" in expression.upper():
             return self._evaluate_case_when_expression(expression, row)
         
+        # 检查是否包含聚合函数
+        if any(func in expression.upper() for func in ['SUM(', 'COUNT(', 'AVG(', 'MAX(', 'MIN(']):
+            return self._evaluate_expression_with_aggregates(expression, row)
+        
         # 替换字段名
         result_expr = expression
         
@@ -964,6 +1070,108 @@ class QueryStep(BaseStep):
             self.log_warning(f"表达式计算失败: {expression} -> {result_expr}, error: {e}")
             return None
     
+    def _evaluate_expression_with_aggregates(self, expression: str, row: Dict[str, Any]) -> Any:
+        """计算包含聚合函数的表达式"""
+        import re
+        
+        result_expr = expression
+        
+        # 处理各种聚合函数
+        for func_name in ['SUM', 'COUNT', 'AVG', 'MAX', 'MIN']:
+            func_pattern = f'{func_name}\\(([^)]+)\\)'
+            func_matches = re.findall(func_pattern, expression, re.IGNORECASE)
+            
+            for field_expr in func_matches:
+                # 动态构建字段名变体，而不是硬编码
+                field_variants = self._build_field_variants(field_expr, row)
+                
+                field_value = None
+                for variant in field_variants:
+                    if variant in row:
+                        field_value = row[variant]
+                        break
+                
+                if field_value is not None:
+                    # 替换聚合函数调用
+                    func_call = f"{func_name}({field_expr})"
+                    result_expr = result_expr.replace(func_call, str(field_value))
+        
+        # 如果替换后表达式还包含SQL聚合函数，说明本地无法处理，直接返回None并警告
+        if re.search(r'(SUM|COUNT|AVG|MAX|MIN)\\(', result_expr, re.IGNORECASE):
+            self.log_warning(f"本地无法处理聚合表达式: {expression} -> {result_expr}")
+            return None
+        
+        # 尝试计算表达式
+        try:
+            return eval(result_expr)
+        except Exception as e:
+            self.log_warning(f"聚合表达式计算失败: {expression} -> {result_expr}, error: {e}")
+            return None
+    
+    def _build_field_variants(self, field_expr: str, row: Dict[str, Any]) -> List[str]:
+        """
+        动态构建字段名变体
+        
+        Args:
+            field_expr: 字段表达式，如 "coc.total_orders"
+            row: 当前行数据
+            
+        Returns:
+            字段名变体列表
+        """
+        variants = [field_expr]  # 原始字段名
+        
+        # 如果字段名包含表别名（如 "coc.total_orders"）
+        if '.' in field_expr:
+            table_alias, field_name = field_expr.split('.', 1)
+            variants.extend([
+                field_name,  # 去掉前缀：total_orders
+                f"{table_alias}_{field_name}"  # 加上别名前缀：coc_total_orders
+            ])
+        else:
+            # 如果字段名不包含表别名，尝试从行数据中推断可能的表别名
+            # 查找所有以该字段名结尾的键
+            for key in row.keys():
+                if key.endswith(f"_{field_expr}"):
+                    variants.append(key)
+        
+        # 从当前查询配置中获取表别名信息，构建更多变体
+        variants.extend(self._get_table_alias_variants(field_expr))
+        
+        return list(set(variants))  # 去重
+    
+    def _get_table_alias_variants(self, field_expr: str) -> List[str]:
+        """
+        从查询配置中获取表别名变体
+        
+        Args:
+            field_expr: 字段表达式
+            
+        Returns:
+            基于表别名的字段变体列表
+        """
+        variants = []
+        
+        # 获取当前查询的配置信息
+        joins = self.config.get("joins", [])
+        data_source = self.config.get("data_source", "")
+        
+        # 解析data_source中的表别名
+        if ' ' in data_source:
+            main_table_alias = data_source.split()[1]  # 如 "orders o" -> "o"
+            if '.' not in field_expr:
+                variants.append(f"{main_table_alias}_{field_expr}")
+        
+        # 从JOIN配置中获取表别名
+        for join_config in joins:
+            join_table = join_config.get("table", "")
+            if ' ' in join_table:
+                join_alias = join_table.split()[1]  # 如 "customer_first_order_date cfod" -> "cfod"
+                if '.' not in field_expr:
+                    variants.append(f"{join_alias}_{field_expr}")
+        
+        return variants
+    
     def _evaluate_case_when_expression(self, expression: str, row: Dict[str, Any]) -> Any:
         """计算 CASE WHEN 表达式"""
         import re
@@ -995,6 +1203,10 @@ class QueryStep(BaseStep):
         """计算条件表达式"""
         import re
         
+        # 处理聚合函数表达式
+        if any(func in condition.upper() for func in ['SUM(', 'COUNT(', 'AVG(', 'MAX(', 'MIN(']):
+            return self._evaluate_condition_with_aggregates(condition, row)
+        
         # 替换字段名
         result_condition = condition
         
@@ -1002,8 +1214,8 @@ class QueryStep(BaseStep):
         field_pattern = r'\b[a-zA-Z_][a-zA-Z0-9_]*\b'
         fields = re.findall(field_pattern, condition)
         
-        # 排除操作符
-        operators = {'>', '<', '>=', '<=', '=', '!=', 'AND', 'OR', 'NOT'}
+        # 排除操作符和SQL关键字
+        operators = {'>', '<', '>=', '<=', '=', '!=', 'AND', 'OR', 'NOT', 'SUM', 'COUNT', 'AVG', 'MAX', 'MIN'}
         
         for field in fields:
             if field.upper() not in operators and field in row:
@@ -1019,6 +1231,62 @@ class QueryStep(BaseStep):
             return bool(eval(result_condition))
         except Exception as e:
             self.log_warning(f"条件计算失败: {condition} -> {result_condition}, error: {e}")
+            return False
+    
+    def _evaluate_condition_with_aggregates(self, condition: str, row: Dict[str, Any]) -> bool:
+        """计算包含聚合函数的条件表达式"""
+        import re
+        
+        # 处理 SUM(field_name) > value 这样的条件
+        # 在这个上下文中，我们假设聚合已经在当前行中计算完成
+        result_condition = condition
+        
+        # 替换SUM(field)为实际值
+        sum_pattern = r'SUM\(([^)]+)\)'
+        sum_matches = re.findall(sum_pattern, condition, re.IGNORECASE)
+        
+        for field_expr in sum_matches:
+            # 动态构建字段名变体，而不是硬编码
+            field_variants = self._build_field_variants(field_expr, row)
+            
+            field_value = None
+            for variant in field_variants:
+                if variant in row:
+                    field_value = row[variant]
+                    break
+            
+            if field_value is not None:
+                # 替换SUM函数调用
+                sum_call = f"SUM({field_expr})"
+                result_condition = result_condition.replace(sum_call, str(field_value))
+        
+        # 处理其他聚合函数（类似方式）
+        for func_name in ['COUNT', 'AVG', 'MAX', 'MIN']:
+            func_pattern = f'{func_name}\\(([^)]+)\\)'
+            func_matches = re.findall(func_pattern, condition, re.IGNORECASE)
+            
+            for field_expr in func_matches:
+                # 动态构建字段名变体，而不是硬编码
+                field_variants = self._build_field_variants(field_expr, row)
+                
+                field_value = None
+                for variant in field_variants:
+                    if variant in row:
+                        field_value = row[variant]
+                        break
+                
+                if field_value is not None:
+                    func_call = f"{func_name}({field_expr})"
+                    result_condition = result_condition.replace(func_call, str(field_value))
+        
+        # 将 SQL 操作符转换为 Python 操作符
+        result_condition = result_condition.replace(' = ', ' == ')
+        result_condition = result_condition.replace('=', '==')
+        
+        try:
+            return bool(eval(result_condition))
+        except Exception as e:
+            self.log_warning(f"聚合条件计算失败: {condition} -> {result_condition}, error: {e}")
             return False
     
     def _parse_value(self, value_str: str) -> Any:
@@ -1320,3 +1588,138 @@ class QueryStep(BaseStep):
         
         # 为字段名添加主表前缀
         return f"{main_table}.{field_name}"
+    
+    def _process_step_data_with_joins(self, main_data: List[Dict[str, Any]], joins: List[Dict[str, Any]], get_source_data) -> List[Dict[str, Any]]:
+        """
+        处理带JOIN的步骤数据
+        
+        Args:
+            main_data: 主表数据
+            joins: JOIN配置
+            get_source_data: 获取源数据的函数
+            
+        Returns:
+            JOIN后的数据
+        """
+        result_data = main_data
+        
+        # 处理每个JOIN
+        for join_config in joins:
+            join_type = join_config.get("type", "INNER").upper()
+            join_table = join_config.get("table", "")
+            join_condition = join_config.get("on", "")
+            
+            # 解析JOIN表名和别名
+            join_table_parts = join_table.split()
+            if len(join_table_parts) >= 2:
+                join_step_name = join_table_parts[0]
+                join_alias = join_table_parts[1]
+            else:
+                join_step_name = join_table
+                join_alias = join_table
+            
+            # 获取JOIN表数据
+            join_data = get_source_data(join_step_name)
+            
+            # 执行JOIN操作
+            result_data = self._perform_step_data_join(result_data, join_data, join_condition, join_type, join_alias)
+        
+        # 处理其他配置（维度、指标、过滤等）
+        return self._process_step_data(result_data)
+
+    def _perform_step_data_join(self, left_data: List[Dict[str, Any]], right_data: List[Dict[str, Any]], 
+                               join_condition: str, join_type: str, right_alias: str = None) -> List[Dict[str, Any]]:
+        """
+        执行步骤数据的JOIN操作
+        
+        Args:
+            left_data: 左表数据
+            right_data: 右表数据
+            join_condition: JOIN条件，如 "coc.customer_id = cfod.customer_id"
+            join_type: JOIN类型
+            right_alias: 右表别名
+            
+        Returns:
+            JOIN后的数据
+        """
+        import re
+        
+        # 解析JOIN条件
+        # 例如: "coc.customer_id = cfod.customer_id"
+        condition_match = re.match(r'(\w+)\.(\w+)\s*=\s*(\w+)\.(\w+)', join_condition.strip())
+        if not condition_match:
+            self.log_warning(f"无法解析JOIN条件: {join_condition}")
+            return left_data
+        
+        left_alias, left_field = condition_match.group(1), condition_match.group(2)
+        right_alias_from_condition, right_field = condition_match.group(3), condition_match.group(4)
+        
+        result = []
+        
+        if join_type == "INNER":
+            # INNER JOIN
+            for left_row in left_data:
+                left_value = left_row.get(left_field)
+                
+                for right_row in right_data:
+                    right_value = right_row.get(right_field)
+                    
+                    if left_value == right_value:
+                        # 合并行数据
+                        merged_row = {}
+                        
+                        # 添加左表数据（带别名前缀）
+                        for key, value in left_row.items():
+                            merged_row[f"{left_alias}.{key}"] = value
+                            # 同时保留无前缀的字段名以保持兼容性
+                            if key not in merged_row:
+                                merged_row[key] = value
+                        
+                        # 添加右表数据（带别名前缀）
+                        for key, value in right_row.items():
+                            prefixed_key = f"{right_alias_from_condition}.{key}"
+                            merged_row[prefixed_key] = value
+                            # 如果左表没有同名字段，也添加无前缀版本
+                            if key not in left_row:
+                                merged_row[key] = value
+                        
+                        result.append(merged_row)
+                        
+        elif join_type == "LEFT":
+            # LEFT JOIN
+            for left_row in left_data:
+                left_value = left_row.get(left_field)
+                joined = False
+                
+                for right_row in right_data:
+                    right_value = right_row.get(right_field)
+                    
+                    if left_value == right_value:
+                        # 合并行数据
+                        merged_row = {}
+                        
+                        # 添加左表数据
+                        for key, value in left_row.items():
+                            merged_row[f"{left_alias}.{key}"] = value
+                            if key not in merged_row:
+                                merged_row[key] = value
+                        
+                        # 添加右表数据
+                        for key, value in right_row.items():
+                            prefixed_key = f"{right_alias_from_condition}.{key}"
+                            merged_row[prefixed_key] = value
+                            if key not in left_row:
+                                merged_row[key] = value
+                        
+                        result.append(merged_row)
+                        joined = True
+                
+                # 如果没有匹配的右表记录，添加左表记录（右表字段为None）
+                if not joined:
+                    merged_row = {}
+                    for key, value in left_row.items():
+                        merged_row[f"{left_alias}.{key}"] = value
+                        merged_row[key] = value
+                    result.append(merged_row)
+        
+        return result
