@@ -128,8 +128,9 @@ class SQLBuilder(LoggerMixin):
         join_parts = []
         
         for join in joins:
-            join_type = join.get("type", "INNER")
-            table = join.get("table")
+            join_type = join.get("type", "INNER").upper()
+            # 支持 target 字段（UQM 使用）和传统的 "table" 字段（兼容性）
+            table = join.get("target") or join.get("table")
             condition = join.get("on")
             
             if not table or not condition:

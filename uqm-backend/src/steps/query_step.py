@@ -216,7 +216,7 @@ class QueryStep(BaseStep):
                 select_fields=select_fields,
                 from_table=data_source,
                 joins=joins,
-                where_conditions=filters,
+                where_conditions=self._resolve_filter_aliases(filters, has_joins),
                 group_by=resolved_group_by,
                 having=having,
                 order_by=order_by,
@@ -248,8 +248,8 @@ class QueryStep(BaseStep):
         expression = field_config.get("expression")
         
         if expression:
-            # 使用自定义表达式
-            result = expression
+            # 使用自定义表达式，验证表别名
+            result = self._validate_and_resolve_aliases(expression) if has_joins else expression
         elif name:
             # 使用字段名，处理歧义
             resolved_name = self._resolve_field_name(name, main_table, has_joins) if main_table else name
@@ -262,6 +262,113 @@ class QueryStep(BaseStep):
             result = f"{result} AS {alias}"
         
         return result
+    
+    def _validate_and_resolve_aliases(self, expression: str) -> str:
+        """
+        验证并解析表达式中的表别名
+        
+        Args:
+            expression: 字段表达式
+            
+        Returns:
+            解析后的表达式
+        """
+        # 获取 JOIN 配置中定义的表别名映射
+        alias_mapping = self._get_table_alias_mapping()
+        
+        # 检查表达式是否包含表别名前缀
+        if '.' in expression:
+            parts = expression.split('.', 1)
+            potential_alias = parts[0]
+            field_name = parts[1]
+            
+            # 如果这个别名在 JOIN 中有定义，则保留；否则移除前缀
+            if potential_alias in alias_mapping:
+                return expression  # 别名有效，保持原样
+            else:
+                # 别名无效，移除前缀，只保留字段名
+                return field_name
+        
+        return expression
+    
+    def _get_table_alias_mapping(self) -> Dict[str, str]:
+        """
+        获取表别名到实际表名的映射
+        
+        Returns:
+            别名映射字典
+        """
+        alias_mapping = {}
+        
+        # 处理主表别名
+        data_source = self.config.get("data_source", "")
+        if ' ' in data_source:
+            parts = data_source.split()
+            table_name = parts[0]
+            table_alias = parts[1]
+            alias_mapping[table_alias] = table_name
+        
+        # 处理 JOIN 表别名
+        joins = self.config.get("joins", [])
+        for join in joins:
+            target = join.get("target", "")
+            if ' ' in target:
+                parts = target.split()
+                table_name = parts[0]
+                table_alias = parts[1]
+                alias_mapping[table_alias] = table_name
+        
+        return alias_mapping
+    
+    def _resolve_filter_aliases(self, filters: List[Dict[str, Any]], has_joins: bool) -> List[Dict[str, Any]]:
+        """
+        解析过滤条件中的表别名
+        
+        Args:
+            filters: 过滤条件列表
+            has_joins: 是否有JOIN
+            
+        Returns:
+            解析后的过滤条件列表
+        """
+        if not has_joins or not filters:
+            return filters
+        
+        resolved_filters = []
+        for filter_condition in filters:
+            resolved_condition = self._resolve_single_filter_alias(filter_condition)
+            resolved_filters.append(resolved_condition)
+        
+        return resolved_filters
+    
+    def _resolve_single_filter_alias(self, filter_condition: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        解析单个过滤条件中的表别名
+        
+        Args:
+            filter_condition: 过滤条件
+            
+        Returns:
+            解析后的过滤条件
+        """
+        if "logic" in filter_condition and "conditions" in filter_condition:
+            # 处理逻辑组合条件
+            resolved_condition = filter_condition.copy()
+            resolved_conditions = []
+            for condition in filter_condition["conditions"]:
+                resolved_conditions.append(self._resolve_single_filter_alias(condition))
+            resolved_condition["conditions"] = resolved_conditions
+            return resolved_condition
+        
+        elif "field" in filter_condition:
+            # 处理简单字段条件
+            resolved_condition = filter_condition.copy()
+            field = filter_condition["field"]
+            resolved_field = self._validate_and_resolve_aliases(field)
+            resolved_condition["field"] = resolved_field
+            return resolved_condition
+        
+        return filter_condition
     
     def _build_metric_expression(self, metric_config: Dict[str, Any], main_table: str = None, has_joins: bool = False) -> str:
         """
