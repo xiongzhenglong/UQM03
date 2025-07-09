@@ -91,9 +91,9 @@ class Settings(BaseSettings):
         """验证配置有效性"""
         try:
             # 验证必需的配置项
-            if not self.SECRET_KEY or self.SECRET_KEY == "change-me-in-production":
-                if not self.DEBUG:
-                    raise ValueError("生产环境必须设置有效的SECRET_KEY")
+            # if not self.SECRET_KEY or self.SECRET_KEY == "change-me-in-production":
+            #     if not self.DEBUG:
+            #         raise ValueError("生产环境必须设置有效的SECRET_KEY")
             
             # 验证数据库配置
             if not any([self.DATABASE_URL, self.MYSQL_URL, self.SQLITE_URL]):

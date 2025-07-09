@@ -24,16 +24,16 @@ class PivotStep(BaseStep):
         # 先初始化支持的聚合函数，在调用 super().__init__ 之前
         # 因为 BaseStep.__init__ 会调用 validate()，而 validate() 需要访问 supported_agg_functions
         self.supported_agg_functions = {
-            'sum': np.sum,
-            'mean': np.mean,
-            'avg': np.mean,
-            'count': np.size,
-            'min': np.min,
-            'max': np.max,
-            'std': np.std,
-            'var': np.var,
-            'first': lambda x: x.iloc[0] if len(x) > 0 else None,
-            'last': lambda x: x.iloc[-1] if len(x) > 0 else None
+            'sum': 'sum',
+            'mean': 'mean',
+            'avg': 'mean',
+            'count': 'count',
+            'min': 'min',
+            'max': 'max',
+            'std': 'std',
+            'var': 'var',
+            'first': 'first',
+            'last': 'last'
         }
         
         # 然后调用父类初始化
@@ -142,17 +142,43 @@ class PivotStep(BaseStep):
                 )
             else:
                 # 多个聚合函数
-                agg_functions = {
-                    val: self.supported_agg_functions[func.lower()]
-                    for val, func in agg_func.items()
-                }
-                pivot_df = df_clean.pivot_table(
-                    index=index,
-                    columns=columns,
-                    values=list(agg_functions.keys()),
-                    aggfunc=agg_functions,
-                    fill_value=fill_value
-                )
+                # 创建聚合函数字典，将输出列名映射到聚合函数
+                agg_functions = {}
+                for output_name, func_name in agg_func.items():
+                    agg_functions[output_name] = self.supported_agg_functions[func_name.lower()]
+                
+                # 对于多聚合函数，我们需要对每个聚合函数分别调用pivot_table，然后合并结果
+                pivot_dfs = []
+                
+                for output_name, func in agg_functions.items():
+                    temp_pivot = df_clean.pivot_table(
+                        index=index,
+                        columns=columns,
+                        values=values,
+                        aggfunc=func,
+                        fill_value=fill_value
+                    )
+                    
+                    # 为列名添加聚合函数前缀
+                    if isinstance(temp_pivot.columns, pd.MultiIndex):
+                        # 多级列名，在最后一级添加前缀
+                        new_columns = []
+                        for col in temp_pivot.columns:
+                            if isinstance(col, tuple):
+                                col_list = list(col)
+                                col_list[-1] = f"{output_name}_{col_list[-1]}"
+                                new_columns.append(tuple(col_list))
+                            else:
+                                new_columns.append(f"{output_name}_{col}")
+                        temp_pivot.columns = pd.MultiIndex.from_tuples(new_columns)
+                    else:
+                        # 单级列名
+                        temp_pivot.columns = [f"{output_name}_{col}" for col in temp_pivot.columns]
+                    
+                    pivot_dfs.append(temp_pivot)
+                
+                # 合并所有透视结果
+                pivot_df = pd.concat(pivot_dfs, axis=1)
             
             # 处理多级列名
             pivot_df = self._flatten_column_names(pivot_df)
@@ -295,8 +321,9 @@ class PivotStep(BaseStep):
             new_columns = []
             for col in pivot_df.columns:
                 if isinstance(col, tuple):
-                    # 组合列名
-                    col_name = "_".join([str(c) for c in col if str(c) != ""])
+                    # 组合列名，过滤空字符串
+                    col_parts = [str(c) for c in col if str(c) != ""]
+                    col_name = "_".join(col_parts)
                     new_columns.append(col_name)
                 else:
                     new_columns.append(str(col))
@@ -347,8 +374,12 @@ class PivotStep(BaseStep):
         
         if column_prefix or column_suffix:
             new_columns = {}
+            index_cols = self.config.get("index", [])
+            if isinstance(index_cols, str):
+                index_cols = [index_cols]
+            
             for col in pivot_df.columns:
-                if col not in self.config.get("index", []):
+                if col not in index_cols:
                     new_col = f"{column_prefix}{col}{column_suffix}"
                     new_columns[col] = new_col
             

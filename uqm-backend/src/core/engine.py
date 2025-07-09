@@ -69,7 +69,7 @@ class UQMEngine(LoggerMixin):
             
             # 检查缓存
             cached_result = None
-            if options.get("cache_enabled", True):
+            if options.get("cache_enabled", False):
                 cached_result = await self.cache_manager.get(cache_key)
                 if cached_result:
                     self.log_info("命中缓存", cache_key=cache_key)
@@ -105,7 +105,7 @@ class UQMEngine(LoggerMixin):
             )
             
             # 缓存结果
-            if options.get("cache_enabled", True):
+            if options.get("cache_enabled", False):
                 cache_ttl = options.get("cache_ttl", self.settings.CACHE_DEFAULT_TIMEOUT)
                 await self.cache_manager.set(cache_key, response, cache_ttl)
             

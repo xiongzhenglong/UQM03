@@ -7,6 +7,10 @@ import time
 import uuid
 from datetime import datetime, timedelta
 from typing import Dict, Any
+import math
+import numpy as np
+import pandas as pd
+from pydantic import BaseModel
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 from fastapi.responses import JSONResponse
@@ -63,6 +67,54 @@ def update_metrics(success: bool, response_time: float, cache_hit: bool = False)
         metrics["cache_misses"] += 1
 
 
+def clean_nan(obj, _path=None):
+    if _path is None:
+        _path = []
+    # float('nan')
+    if isinstance(obj, float) and math.isnan(obj):
+        print(f"[NaN found] path={_path} type=float value={obj}")
+        return None
+    # numpy.nan
+    if isinstance(obj, np.floating) and np.isnan(obj):
+        print(f"[NaN found] path={_path} type=numpy.nan value={obj}")
+        return None
+    # pandas.NA
+    if obj is pd.NA:
+        print(f"[NaN found] path={_path} type=pandas.NA value={obj}")
+        return None
+    # pandas.NaT
+    if obj is pd.NaT:
+        print(f"[NaN found] path={_path} type=pandas.NaT value={obj}")
+        return None
+    # None 直接返回
+    if obj is None:
+        return None
+    # dict 递归
+    if isinstance(obj, dict):
+        return {k: clean_nan(v, _path+['.'+str(k)]) for k, v in obj.items()}
+    # list 递归
+    if isinstance(obj, list):
+        return [clean_nan(v, _path+[f'[{i}]']) for i, v in enumerate(obj)]
+    # tuple 递归
+    if isinstance(obj, tuple):
+        return tuple(clean_nan(v, _path+[f'({i})']) for i, v in enumerate(obj))
+    # set 递归
+    if isinstance(obj, set):
+        return {clean_nan(v, _path+[f'{{{i}}}']) for i, v in enumerate(obj)}
+    # Pydantic/BaseModel 递归
+    if isinstance(obj, BaseModel):
+        print(f"[BaseModel found] path={_path} type={type(obj)} value={obj}")
+        return clean_nan(obj.dict(), _path+['.dict'])
+    # 其它对象，尝试递归 __dict__
+    if hasattr(obj, '__dict__'):
+        print(f"[__dict__ found] path={_path} type={type(obj)} value={obj}")
+        return clean_nan(vars(obj), _path+['.__dict__'])
+    # 打印所有未处理类型
+    if not isinstance(obj, (str, int, bool)):
+        print(f"[Unhandled type] path={_path} type={type(obj)} value={obj}")
+    return obj
+
+
 @router.post(
     "/execute",
     response_model=UQMResponse,
@@ -101,6 +153,11 @@ async def execute_uqm(request: UQMRequest) -> UQMResponse:
             parameters=request.parameters,
             options=request.options
         )
+        # 只递归清理 result.data，保持 result 类型不变
+        if hasattr(result, 'data'):
+            result.data = clean_nan(result.data)
+        else:
+            print('[ERROR] result has no .data attribute, type:', type(result))
         
         response_time = time.time() - start_time
         update_metrics(success=True, response_time=response_time)

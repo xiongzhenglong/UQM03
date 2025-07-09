@@ -139,7 +139,7 @@ class Executor(LoggerMixin):
             cached_data = None
             cache_hit = False
             
-            if self.options.get("cache_enabled", True):
+            if self.options.get("cache_enabled", False):
                 cached_data = await self.cache_manager.get(cache_key)
                 if cached_data is not None:
                     cache_hit = True
@@ -153,7 +153,7 @@ class Executor(LoggerMixin):
                 step_data = await self._execute_step_by_type(step_type, config)
                 
                 # 缓存结果
-                if self.options.get("cache_enabled", True) and step_data:
+                if self.options.get("cache_enabled", False) and step_data:
                     cache_ttl = self._parse_ttl(config.get("cache_ttl", "1h"))
                     await self.cache_manager.set(cache_key, step_data, cache_ttl)
             

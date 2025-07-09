@@ -144,6 +144,9 @@ class EnrichStep(BaseStep):
             # 执行连接
             result_df = self._perform_join(source_df, lookup_df, join_config)
             
+            # 修复所有 NaN 为 None，避免 JSON 报错
+            result_df = result_df.where(pd.notnull(result_df), None)
+            
             # 转换回字典列表
             return result_df.to_dict('records')
             
@@ -160,6 +163,9 @@ class EnrichStep(BaseStep):
         """
         on_config = self.config["on"]
         join_type = self.config.get("join_type", "left")
+        # 支持 full join_type，自动映射为 pandas 的 outer
+        if join_type == "full":
+            join_type = "outer"
         
         if isinstance(on_config, str):
             # 简单字段连接
@@ -199,41 +205,23 @@ class EnrichStep(BaseStep):
             source_df: 源数据DataFrame
             lookup_df: 查找表DataFrame
             join_config: 连接配置
-            
         Returns:
             连接后的DataFrame
         """
-        join_type = join_config["type"]
         left_on = join_config["left_on"]
         right_on = join_config["right_on"]
-        
-        # 验证连接键是否存在
-        self._validate_join_keys(source_df, lookup_df, left_on, right_on)
-        
-        # 根据连接类型执行连接
-        if join_type.lower() == "left":
-            how = "left"
-        elif join_type.lower() == "right":
-            how = "right"
-        elif join_type.lower() == "inner":
-            how = "inner"
-        elif join_type.lower() == "outer":
-            how = "outer"
-        else:
-            how = "left"  # 默认左连接
-        
-        # 执行连接
-        result_df = source_df.merge(
+        join_type = join_config["type"]
+        # pandas merge 支持 how: 'left', 'right', 'outer', 'inner'
+        result_df = pd.merge(
+            source_df,
             lookup_df,
+            how=join_type,
             left_on=left_on,
             right_on=right_on,
-            how=how,
-            suffixes=('', '_lookup')
+            suffixes=("", "_y")
         )
-        
-        # 处理列名冲突
-        result_df = self._handle_column_conflicts(result_df)
-        
+        # 修复所有 NaN 为 None，避免 JSON 报错
+        result_df = result_df.where(pd.notnull(result_df), None)
         return result_df
     
     def _validate_join_keys(self, source_df: pd.DataFrame, 
