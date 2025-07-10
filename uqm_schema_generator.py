@@ -340,7 +340,7 @@ def main():
     """Main function to run the UQM Schema Generator"""
     
     # Configuration
-    OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY") or "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"
+    OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY") or "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"
     if not OPENROUTER_API_KEY:
         print("Error: OPENROUTER_API_KEY environment variable not set")
         print("Please set it with: $env:OPENROUTER_API_KEY='your_api_key'")

@@ -51,7 +51,7 @@ class QueryStep(BaseStep):
         if not dimensions and not metrics and not calculated_fields:
             raise ValidationError("至少需要指定dimensions、metrics或calculated_fields之一")
     
-    async def execute(self, context: Dict[str, Any]) -> List[Dict[str, Any]]:
+    async def execute(self, context: Dict[str, Any]) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
         """
         执行查询步骤
         
@@ -59,7 +59,7 @@ class QueryStep(BaseStep):
             context: 执行上下文
             
         Returns:
-            查询结果
+            查询结果，如果有分页则返回{"data": [...], "total_count": N}，否则返回[...]
         """
         try:
             data_source = self.config["data_source"]
@@ -126,29 +126,76 @@ class QueryStep(BaseStep):
         
         return result
     
-    async def _execute_with_database(self, context: Dict[str, Any]) -> List[Dict[str, Any]]:
+    async def _execute_with_database(self, context: Dict[str, Any]) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
         """
-        使用数据库执行查询
+        使用数据库执行查询，支持分页
         
         Args:
             context: 执行上下文
             
         Returns:
-            查询结果
+            查询结果，如果有分页则返回{"data": [...], "total_count": N}，否则返回[...]
         """
         # 获取连接器管理器
         connector_manager = context["connector_manager"]
-        
-        # 构建SQL查询
-        query = self.build_query()
-        
-        # 只用全局默认连接器
         connector = await connector_manager.get_default_connector()
         
-        # 执行查询
-        result = await connector.execute_query(query)
+        # 获取分页选项
+        options = context.get("options", {})
+        page = options.get("page")
+        page_size = options.get("page_size")
         
-        return result
+        total_count = None
+        
+        # 如果提供了分页参数，执行分页逻辑
+        if page and page_size:
+            self.log_info(f"执行分页查询: page={page}, page_size={page_size}")
+            
+            # 1. 执行COUNT查询获取总记录数
+            count_query = self.build_count_query()
+            self.log_debug("COUNT查询", query=count_query)
+            
+            count_result = await connector.execute_query(count_query)
+            total_count = count_result[0].get('total', 0) if count_result else 0
+            
+            self.log_info(f"查询总记录数: {total_count}")
+            
+            # 2. 修改配置以应用分页
+            original_limit = self.config.get("limit")
+            original_offset = self.config.get("offset")
+            
+            # 计算分页的limit和offset
+            self.config["limit"] = page_size
+            self.config["offset"] = (page - 1) * page_size
+            
+            # 3. 执行分页数据查询
+            data_query = self.build_query()
+            self.log_debug("分页数据查询", query=data_query)
+            
+            data_result = await connector.execute_query(data_query)
+            
+            # 4. 恢复原始配置
+            if original_limit is not None:
+                self.config["limit"] = original_limit
+            else:
+                self.config.pop("limit", None)
+                
+            if original_offset is not None:
+                self.config["offset"] = original_offset
+            else:
+                self.config.pop("offset", None)
+            
+            return {
+                "data": data_result,
+                "total_count": total_count
+            }
+        else:
+            # 普通查询，不分页
+            query = self.build_query()
+            self.log_debug("普通查询", query=query)
+            
+            result = await connector.execute_query(query)
+            return result
     
     def build_query(self) -> str:
         """
@@ -230,6 +277,54 @@ class QueryStep(BaseStep):
         except Exception as e:
             self.log_error("构建SQL查询失败", error=str(e))
             raise ValidationError(f"构建查询失败: {e}")
+    
+    def build_count_query(self) -> str:
+        """
+        构建用于获取总行数的SQL COUNT查询
+        
+        Returns:
+            COUNT查询语句
+        """
+        try:
+            data_source = self.config["data_source"]
+            filters = self.config.get("filters", [])
+            joins = self.config.get("joins", [])
+            group_by = self.config.get("group_by", [])
+            having = self.config.get("having", [])
+            
+            # 如果有JOIN，需要处理字段歧义问题
+            has_joins = joins and len(joins) > 0
+            
+            # 处理GROUP BY字段的歧义
+            resolved_group_by = []
+            for field in group_by:
+                if isinstance(field, str):
+                    resolved_field = self._resolve_field_name(field, data_source, has_joins)
+                    resolved_group_by.append(resolved_field)
+                else:
+                    resolved_group_by.append(field)
+            
+            # 使用SQL构建器构建COUNT查询
+            query = self.sql_builder.build_select_query(
+                select_fields=["COUNT(*) as total"],
+                from_table=data_source,
+                joins=joins,
+                where_conditions=self._resolve_filter_aliases(filters, has_joins),
+                group_by=resolved_group_by,
+                having=having
+                # 注意：COUNT查询不需要 ORDER BY, LIMIT, OFFSET
+            )
+            
+            # 如果存在GROUP BY，我们需要计算分组后的总数
+            if resolved_group_by:
+                query = f"SELECT COUNT(*) as total FROM ({query}) as subquery"
+            
+            self.log_debug("构建的COUNT查询", query=query)
+            return query
+            
+        except Exception as e:
+            self.log_error("构建COUNT查询失败", error=str(e))
+            raise ValidationError(f"构建COUNT查询失败: {e}")
     
     def _build_field_expression(self, field_config: Dict[str, Any], main_table: str = None, has_joins: bool = False) -> str:
         """

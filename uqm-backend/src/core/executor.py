@@ -37,7 +37,9 @@ class Executor(LoggerMixin):
     def __init__(self, steps: List[Dict[str, Any]], 
                  connector_manager: BaseConnectorManager,
                  cache_manager: BaseCacheManager,
-                 options: Optional[Dict[str, Any]] = None):
+                 options: Optional[Dict[str, Any]] = None,
+                 pagination_target_step: Optional[str] = None,
+                 pagination_options: Optional[Dict[str, Any]] = None):
         """
         初始化执行器
         
@@ -46,11 +48,15 @@ class Executor(LoggerMixin):
             connector_manager: 连接器管理器
             cache_manager: 缓存管理器
             options: 执行选项
+            pagination_target_step: 分页目标步骤名称
+            pagination_options: 分页选项
         """
         self.steps = steps
         self.connector_manager = connector_manager
         self.cache_manager = cache_manager
         self.options = options or {}
+        self.pagination_target_step = pagination_target_step
+        self.pagination_options = pagination_options or {}
         
         # 步骤执行结果存储
         self.step_results: Dict[str, Any] = {}
@@ -147,10 +153,20 @@ class Executor(LoggerMixin):
             
             if cache_hit:
                 # 使用缓存数据
-                step_data = cached_data
+                step_execution_result = cached_data
+                if isinstance(step_execution_result, dict) and "data" in step_execution_result:
+                    step_data = step_execution_result["data"]
+                else:
+                    step_data = step_execution_result
             else:
                 # 执行步骤
-                step_data = await self._execute_step_by_type(step_type, config)
+                step_execution_result = await self._execute_step_by_type(step_type, config, step_name)
+                
+                # 处理分页查询的返回结果
+                if isinstance(step_execution_result, dict) and "data" in step_execution_result:
+                    step_data = step_execution_result["data"]
+                else:
+                    step_data = step_execution_result
                 
                 # 缓存结果
                 if self.options.get("cache_enabled", False) and step_data:
@@ -160,13 +176,21 @@ class Executor(LoggerMixin):
             execution_time = time.time() - start_time
             
             # 记录步骤执行结果
-            self.step_results[step_name] = {
+            step_result = {
                 "type": step_type,
                 "status": "completed",
                 "execution_time": execution_time,
                 "row_count": len(step_data) if step_data else 0,
                 "cache_hit": cache_hit
             }
+            
+            # 如果这是一个分页查询步骤，记录总数
+            if (isinstance(step_execution_result, dict) and 
+                "total_count" in step_execution_result and
+                step_name == self.pagination_target_step):
+                step_result["total_count"] = step_execution_result["total_count"]
+            
+            self.step_results[step_name] = step_result
             
             # 存储步骤数据
             self.step_data[step_name] = step_data or []
@@ -188,13 +212,15 @@ class Executor(LoggerMixin):
             raise ExecutionError(f"步骤 {step_name} 执行失败: {e}")
     
     async def _execute_step_by_type(self, step_type: str, 
-                                   config: Dict[str, Any]) -> List[Dict[str, Any]]:
+                                   config: Dict[str, Any],
+                                   step_name: str) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
         """
         根据步骤类型执行步骤
         
         Args:
             step_type: 步骤类型
             config: 步骤配置
+            step_name: 步骤名称
             
         Returns:
             步骤执行结果数据
@@ -209,27 +235,37 @@ class Executor(LoggerMixin):
         step_instance = step_class(config)
         
         # 准备执行上下文
-        context = self._prepare_execution_context(config)
+        context = self._prepare_execution_context(config, step_name)
         
         # 执行步骤
         result = await step_instance.execute(context)
         
         return result
     
-    def _prepare_execution_context(self, config: Dict[str, Any]) -> Dict[str, Any]:
+    def _prepare_execution_context(self, config: Dict[str, Any], step_name: str) -> Dict[str, Any]:
         """
         准备步骤执行上下文
         
         Args:
             config: 步骤配置
+            step_name: 步骤名称
             
         Returns:
             执行上下文
         """
+        # 复制选项，避免修改原始选项
+        context_options = self.options.copy()
+        
+        # 如果这是分页目标步骤，注入分页选项
+        if (step_name == self.pagination_target_step and 
+            self.pagination_options):
+            context_options.update(self.pagination_options)
+            self.log_info(f"为步骤 '{step_name}' 注入分页选项", **self.pagination_options)
+        
         context = {
             "connector_manager": self.connector_manager,
             "cache_manager": self.cache_manager,
-            "options": self.options,
+            "options": context_options,
             "step_data": self.step_data,
             "get_source_data": self._get_source_data
         }

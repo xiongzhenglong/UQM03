@@ -75,32 +75,50 @@ class UQMEngine(LoggerMixin):
                     self.log_info("命中缓存", cache_key=cache_key)
                     return cached_result
             
+            # 分析分页选项
+            output_step_name = processed_data["output"]
+            pagination_target_step = options.get("pagination_target_step", output_step_name)
+            pagination_options = self._extract_pagination_options(options, processed_data, pagination_target_step)
+            
             # 创建执行器并执行
             executor = Executor(
                 steps=processed_data["steps"],
                 connector_manager=self.connector_manager,
                 cache_manager=self.cache_manager,
-                options=options
+                options=options,
+                pagination_target_step=pagination_target_step,
+                pagination_options=pagination_options
             )
             
             execution_result = await executor.execute()
             
             # 获取输出步骤的结果
-            output_step = processed_data["output"]
-            output_data = execution_result.get_step_data(output_step)
+            output_data = execution_result.get_step_data(output_step_name)
+            
+            # 构建分页信息
+            pagination_info = self._build_pagination_info(
+                pagination_options, 
+                execution_result.step_results.get(pagination_target_step, {})
+            )
             
             # 构建响应
             execution_time = time.time() - start_time
+            execution_info = {
+                "total_time": execution_time,
+                "row_count": len(output_data) if output_data else 0,
+                "cache_hit": False,
+                "steps_executed": len(processed_data["steps"])
+            }
+            
+            # 如果有分页信息，添加到执行信息中
+            if pagination_info:
+                execution_info["pagination"] = pagination_info
+            
             response = UQMResponse(
                 success=True,
                 data=output_data,
                 metadata=Metadata(**processed_data["metadata"]),
-                execution_info={
-                    "total_time": execution_time,
-                    "row_count": len(output_data) if output_data else 0,
-                    "cache_hit": False,
-                    "steps_executed": len(processed_data["steps"])
-                },
+                execution_info=execution_info,
                 step_results=self._build_step_results(execution_result.step_results)
             )
             
@@ -404,6 +422,81 @@ class UQMEngine(LoggerMixin):
             self.log_error("生成缓存键失败", error=str(e))
             # 如果生成缓存键失败，返回一个基于时间的键（不会命中缓存）
             return f"uqm_cache:no_cache_{int(time.time())}"
+    
+    def _extract_pagination_options(self, options: Dict[str, Any], 
+                                   processed_data: Dict[str, Any],
+                                   pagination_target_step: str) -> Optional[Dict[str, Any]]:
+        """
+        提取分页选项
+        
+        Args:
+            options: 执行选项
+            processed_data: 处理后的UQM数据
+            pagination_target_step: 分页目标步骤名称
+            
+        Returns:
+            分页选项字典，如果不需要分页则返回None
+        """
+        page = options.get("page")
+        page_size = options.get("page_size")
+        
+        # 检查是否提供了分页参数
+        if not page or not page_size:
+            return None
+        
+        # 检查目标步骤是否存在且为query类型
+        target_step = None
+        for step in processed_data["steps"]:
+            if step["name"] == pagination_target_step:
+                target_step = step
+                break
+        
+        if not target_step or target_step.get("type") != "query":
+            self.log_warning(
+                f"分页目标步骤 '{pagination_target_step}' 不存在或不是query类型，忽略分页选项"
+            )
+            return None
+        
+        self.log_info(
+            f"应用分页到步骤 '{pagination_target_step}'",
+            page=page,
+            page_size=page_size
+        )
+        
+        return {
+            "page": int(page),
+            "page_size": int(page_size)
+        }
+    
+    def _build_pagination_info(self, pagination_options: Optional[Dict[str, Any]], 
+                              target_step_result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        构建分页信息
+        
+        Args:
+            pagination_options: 分页选项
+            target_step_result: 目标步骤的执行结果
+            
+        Returns:
+            分页信息字典，如果没有分页则返回None
+        """
+        if not pagination_options:
+            return None
+        
+        total_count = target_step_result.get("total_count")
+        if total_count is None:
+            return None
+        
+        page = pagination_options["page"]
+        page_size = pagination_options["page_size"]
+        total_pages = (total_count + page_size - 1) // page_size
+        
+        return {
+            "page": page,
+            "page_size": page_size,
+            "total_items": total_count,
+            "total_pages": total_pages
+        }
     
     def _build_step_results(self, step_results: Dict[str, Any]) -> List[StepResult]:
         """

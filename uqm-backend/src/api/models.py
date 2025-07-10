@@ -38,6 +38,14 @@ class Parameter(BaseModel):
     description: Optional[str] = Field(None, description="参数描述")
 
 
+class PaginationInfo(BaseModel):
+    """分页信息模型"""
+    page: int = Field(..., description="当前页码")
+    page_size: int = Field(..., description="每页大小")
+    total_items: int = Field(..., description="总项目数")
+    total_pages: int = Field(..., description="总页数")
+
+
 class Metadata(BaseModel):
     """元数据模型"""
     name: str = Field(..., description="查询名称")
@@ -130,7 +138,10 @@ class UQMRequest(BaseModel):
                 },
                 "options": {
                     "cache_enabled": True,
-                    "timeout": 300
+                    "timeout": 300,
+                    "page": 1,
+                    "page_size": 20,
+                    "pagination_target_step": "step1"
                 }
             }
         }
@@ -159,7 +170,13 @@ class UQMResponse(BaseModel):
                 "execution_info": {
                     "total_time": 1.23,
                     "row_count": 2,
-                    "cache_hit": False
+                    "cache_hit": False,
+                    "pagination": {
+                        "page": 1,
+                        "page_size": 20,
+                        "total_items": 2,
+                        "total_pages": 1
+                    }
                 },
                 "step_results": [
                     {

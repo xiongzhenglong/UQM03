@@ -1,7 +1,7 @@
 # UQM JSON Schema 权威技术参考手册
 
-**版本: 2.0**
-**最后更新: 2024-08-16**
+**版本: 2.1**
+**最后更新: 2025-01-09**
 
 ---
 
@@ -27,7 +27,7 @@
 
 ## 2. 全局请求结构
 
-一个完整的 UQM API 请求由一个 JSON 对象表示，该对象包含 `uqm` 和 `parameters` 两个可选的顶级字段。服务器的执行端点需要的是 `uqm` 字段内的完整查询定义。
+一个完整的 UQM API 请求由一个 JSON 对象表示，该对象包含 `uqm`、`parameters` 和 `options` 三个可选的顶级字段。服务器的执行端点需要的是 `uqm` 字段内的完整查询定义。
 
 ```json
 {
@@ -38,6 +38,12 @@
   },
   "parameters": {
     "param_name": "param_value"
+  },
+  "options": {
+    "cache_enabled": true,
+    "page": 1,
+    "page_size": 20,
+    "pagination_target_step": "step_name"
   }
 }
 ```
@@ -46,6 +52,74 @@
 | :----------- | :----- | :------- | :------------------------------------------------------------------------------------------------------------------------------- |
 | `uqm`        | Object | 是       | 包含 UQM 查询定义的完整对象。                                                                                                    |
 | `parameters` | Object | 否       | **运行时参数**：一个键值对对象，用于在查询执行时动态传入变量。这些参数可以在 `steps` 的 `config` 中通过 `$param` 语法引用。 |
+| `options`    | Object | 否       | **执行选项**：控制查询执行行为的配置参数，包括缓存、分页等设置。                                                                  |
+
+### 2.2 执行选项 (`options`)
+
+`options` 对象用于控制查询的执行行为。所有选项都是可选的。
+
+| 字段名                    | 类型    | 默认值  | 描述                                                                                 |
+| :------------------------ | :------ | :------ | :---------------------------------------------------------------------------------- |
+| `cache_enabled`           | Boolean | false   | 是否启用查询缓存。                                                                   |
+| `timeout`                 | Integer | 300     | 查询超时时间（秒）。                                                                 |
+| `page`                    | Integer | -       | **分页参数**：页码，从1开始。必须与 `page_size` 一起使用。                           |
+| `page_size`               | Integer | -       | **分页参数**：每页记录数。必须与 `page` 一起使用。                                   |
+| `pagination_target_step`  | String  | -       | **分页目标**：指定要应用分页的步骤名称。如果未指定，则默认尝试对最终输出步骤分页。      |
+
+#### 2.2.1 分页功能
+
+UQM 支持对 `query` 类型的步骤进行精确的分页控制。分页功能具有以下特性：
+
+- **精确定位**：通过 `pagination_target_step` 明确指定要分页的步骤
+- **智能降级**：如果未指定目标步骤，默认尝试对最终 `output` 步骤分页（仅当它是 `query` 类型时）
+- **类型限制**：分页只能应用于 `query` 类型的步骤，其他类型步骤会被忽略
+- **多步骤支持**：在多步骤查询中，只对指定的步骤进行分页，不影响其他步骤
+
+?> **分页使用示例**
+```json
+{
+  "uqm": {
+    "metadata": { "name": "员工列表分页查询" },
+    "steps": [
+      {
+        "name": "get_employees",
+        "type": "query",
+        "config": {
+          "data_source": "employees",
+          "dimensions": ["employee_id", "first_name", "last_name"],
+          "order_by": [{"field": "employee_id", "direction": "ASC"}]
+        }
+      }
+    ],
+    "output": "get_employees"
+  },
+  "options": {
+    "page": 2,
+    "page_size": 10,
+    "pagination_target_step": "get_employees"
+  }
+}
+```
+
+**分页响应格式**：
+分页查询的响应会在 `execution_info` 中包含分页元数据：
+```json
+{
+  "success": true,
+  "data": [ ... ],
+  "execution_info": {
+    "total_time": 0.08,
+    "row_count": 10,
+    "cache_hit": false,
+    "pagination": {
+      "page": 2,
+      "page_size": 10,
+      "total_items": 156,
+      "total_pages": 16
+    }
+  }
+}
+```
 
 ### 2.1 UQM 内部结构
 
@@ -514,41 +588,56 @@
 ---
 ## 7. 全局配置字段速查表
 
-下表按字母顺序列出了所有 `config` 中可能用到的字段，并注明其所属的步骤类型。
+下表按字母顺序列出了所有 `config` 和 `options` 中可能用到的字段，并注明其所属的步骤类型或作用域。
 
-| 字段名                | 所属步骤                                  |
-| :-------------------- | :---------------------------------------- |
-| `add_source_column`   | `union`                                   |
-| `agg_func`            | `pivot`                                   |
-| `assertions`          | `assert`                                  |
-| `calculated_fields`   | `query`                                   |
-| `column_prefix`       | `pivot`                                   |
-| `column_suffix`       | `pivot`                                   |
-| `columns`             | `pivot`, `enrich` (in lookup), `assert`   |
-| `data_source`         | `query`                                   |
-| `dimensions`          | `query`                                   |
-| `fill_value`          | `pivot`                                   |
-| `filters`             | `query`                                   |
-| `group_by`            | `query`                                   |
-| `having`              | `query`                                   |
-| `id_vars`             | `unpivot`                                 |
-| `index`               | `pivot`                                   |
-| `join_type`           | `enrich`, `query` (in `joins`)            |
-| `joins`               | `query`                                   |
-| `limit`               | `query`                                   |
-| `lookup`              | `enrich`                                  |
-| `metrics`             | `query`                                   |
-| `offset`              | `query`                                   |
-| `on`                  | `enrich`, `query` (in `joins`)            |
-| `order_by`            | `query`                                   |
-| `remove_duplicates`   | `union`                                   |
-| `source`              | `enrich`, `pivot`, `unpivot`, `union`, `assert` |
-| `source_column`       | `union`                                   |
-| `sources`             | `union`                                   |
-| `table`               | `enrich` (in lookup)                      |
-| `target`              | `query` (in `joins`)                      |
-| `value_name`          | `unpivot`                                 |
-| `value_vars`          | `unpivot`                                 |
-| `values`              | `pivot`                                   |
-| `var_name`            | `unpivot`                                 |
-| `where`               | `enrich` (in lookup)                      | 
+| 字段名                    | 所属步骤/作用域                           |
+| :------------------------ | :---------------------------------------- |
+| `add_source_column`       | `union`                                   |
+| `agg_func`                | `pivot`                                   |
+| `assertions`              | `assert`                                  |
+| `cache_enabled`           | `options` (全局)                          |
+| `calculated_fields`       | `query`                                   |
+| `column_prefix`           | `pivot`                                   |
+| `column_suffix`           | `pivot`                                   |
+| `columns`                 | `pivot`, `enrich` (in lookup), `assert`   |
+| `data_source`             | `query`                                   |
+| `dimensions`              | `query`                                   |
+| `fill_value`              | `pivot`                                   |
+| `filters`                 | `query`                                   |
+| `group_by`                | `query`                                   |
+| `having`                  | `query`                                   |
+| `id_vars`                 | `unpivot`                                 |
+| `index`                   | `pivot`                                   |
+| `join_type`               | `enrich`, `query` (in `joins`)            |
+| `joins`                   | `query`                                   |
+| `limit`                   | `query`                                   |
+| `lookup`                  | `enrich`                                  |
+| `metrics`                 | `query`                                   |
+| `offset`                  | `query`                                   |
+| `on`                      | `enrich`, `query` (in `joins`)            |
+| `order_by`                | `query`                                   |
+| `page`                    | `options` (全局) - **分页参数**             |
+| `page_size`               | `options` (全局) - **分页参数**             |
+| `pagination_target_step`  | `options` (全局) - **分页目标定位**         |
+| `remove_duplicates`       | `union`                                   |
+| `source`                  | `enrich`, `pivot`, `unpivot`, `union`, `assert` |
+| `source_column`           | `union`                                   |
+| `sources`                 | `union`                                   |
+| `table`                   | `enrich` (in lookup)                      |
+| `target`                  | `query` (in `joins`)                      |
+| `timeout`                 | `options` (全局)                          |
+| `value_name`              | `unpivot`                                 |
+| `value_vars`              | `unpivot`                                 |
+| `values`                  | `pivot`                                   |
+| `var_name`                | `unpivot`                                 |
+| `where`                   | `enrich` (in lookup)                      |
+
+### 7.1 分页功能新增字段说明
+
+| 字段名                    | 类型    | 描述                                                                             |
+| :------------------------ | :------ | :------------------------------------------------------------------------------- |
+| `page`                    | Integer | 页码，从1开始。必须与 `page_size` 配合使用。                                      |
+| `page_size`               | Integer | 每页返回的记录数。必须与 `page` 配合使用。                                        |
+| `pagination_target_step`  | String  | 指定要应用分页的步骤名称。只能用于 `query` 类型的步骤。如果未指定，默认对最终输出步骤分页。 |
+
+**重要说明**：分页功能仅适用于 `query` 类型的步骤。当启用分页时，响应的 `execution_info` 将包含 `pagination` 对象，提供完整的分页元数据。 
