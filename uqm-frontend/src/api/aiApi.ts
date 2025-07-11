@@ -1,9 +1,8 @@
 import type { AIGenerateRequest, AIGenerateResponse } from '../types/renderer';
-import { tableTemplate, barChartTemplate } from '../utils/templates';
+import { tableTemplate, barChartTemplate, pieChartTemplate, lineChartTemplate } from '../utils/templates';
 
 /**
- * 伪 AI 服务 API
- * MVP 阶段使用模板匹配来模拟 AI 生成渲染函数的行为
+ * AI 服务 API (MVP 阶段使用模板匹配)
  */
 export const aiApi = {
   async generateRenderer(request: AIGenerateRequest): Promise<AIGenerateResponse> {
@@ -26,30 +25,34 @@ export const aiApi = {
       } else if (intent.visualizationType === 'chart') {
         if (intent.chartType === 'bar') {
           rendererCode = barChartTemplate(dataStructure.fields, intent.fields);
+        } else if (intent.chartType === 'pie') {
+          rendererCode = pieChartTemplate(dataStructure.fields, intent.fields);
+        } else if (intent.chartType === 'line') {
+          rendererCode = lineChartTemplate(dataStructure.fields, intent.fields);
         } else {
-          // 为其他图表类型返回一个默认或错误提示
-          throw new Error(`暂不支持生成 ${intent.chartType} 图表。`);
+          // 默认使用柱状图
+          rendererCode = barChartTemplate(dataStructure.fields, intent.fields);
         }
       } else {
-        throw new Error('无法识别您的可视化意图，请尝试“表格”或“柱状图”。');
+        throw new Error('无法识别您的可视化意图，请尝试"表格"、"柱状图"、"饼图"或"折线图"。');
       }
       
       return {
         success: true,
         rendererCode,
-        explanation: `根据您的需求“${userPrompt}”，我生成了相应的 ${intent.visualizationType} 渲染代码。`,
+        explanation: `根据您的需求"${userPrompt}"，我生成了相应的${intent.visualizationType}渲染代码。`,
       };
     } catch (error: any) {
       return {
         success: false,
-        error: `AI 生成失败: ${error.message}`,
+        error: `AI 生成失败: ${error.message}`
       };
     }
   }
 };
 
 /**
- * 简单分析用户意图
+ * 意图分析函数
  */
 function analyzeUserIntent(prompt: string): {
   visualizationType: 'table' | 'chart' | 'unknown';
@@ -58,10 +61,11 @@ function analyzeUserIntent(prompt: string): {
 } {
   const lowerPrompt = prompt.toLowerCase();
   
+  // 图表关键词检测
   const chartKeywords = {
-    bar: ['柱状图', '条形图', 'bar', 'column'],
-    line: ['折线图', '线图', 'line', 'trend'],
-    pie: ['饼图', '圆饼图', 'pie'],
+    bar: ['柱状图', '条形图', 'bar', 'column', '薪资分布', '工资分布'],
+    line: ['折线图', '线图', 'line', 'trend', '趋势', '变化'],
+    pie: ['饼图', '圆饼图', 'pie', '分布', '占比'],
     scatter: ['散点图', 'scatter']
   };
 
@@ -74,15 +78,18 @@ function analyzeUserIntent(prompt: string): {
     }
   }
 
-  if (['表格', 'table', '列表', 'list'].some(kw => lowerPrompt.includes(kw))) {
+  // 表格关键词
+  const tableKeywords = ['表格', 'table', '列表', 'list', '员工信息', '详细信息'];
+  if (tableKeywords.some(kw => lowerPrompt.includes(kw))) {
     return { visualizationType: 'table' };
   }
   
+  // 如果没有明确指定，根据数据特征智能选择
   return { visualizationType: 'unknown' };
 }
 
 /**
- * 简单分析数据结构，提取字段名
+ * 数据结构分析函数
  */
 function analyzeDataStructure(data: any[]): { fields: string[] } {
   if (data.length === 0) {

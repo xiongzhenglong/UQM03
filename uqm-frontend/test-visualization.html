@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI可视化生成测试</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+        }
+        input, select, textarea {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        textarea {
+            height: 100px;
+            resize: vertical;
+        }
+        button {
+            background: #1890ff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        button:hover {
+            background: #40a9ff;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background: #f9f9f9;
+        }
+        .error {
+            color: #ff4d4f;
+            background: #fff2f0;
+            border-color: #ffccc7;
+        }
+        .success {
+            color: #52c41a;
+            background: #f6ffed;
+            border-color: #b7eb8f;
+        }
+        .loading {
+            color: #1890ff;
+        }
+        .visualization-preview {
+            margin-top: 20px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 20px;
+            background: white;
+        }
+        .table-container {
+            overflow-x: auto;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px 12px;
+            text-align: left;
+        }
+        th {
+            background: #f5f5f5;
+            font-weight: 500;
+        }
+        .chart-container {
+            width: 100%;
+            height: 400px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        
+        .tabs {
+            display: flex;
+            border-bottom: 1px solid #ddd;
+            margin-bottom: 15px;
+        }
+        
+        .tab-button {
+            padding: 8px 16px;
+            border: none;
+            background: none;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+        }
+        
+        .tab-button.active {
+            border-bottom-color: #1890ff;
+            color: #1890ff;
+        }
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        .code-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 12px;
+            background: #f5f5f5;
+            border: 1px solid #ddd;
+            border-bottom: none;
+            border-radius: 4px 4px 0 0;
+        }
+        
+        .copy-btn {
+            padding: 4px 8px;
+            background: #1890ff;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        
+        .copy-btn:hover {
+            background: #40a9ff;
+        }
+        
+        .code-block {
+            background: #f8f8f8;
+            border: 1px solid #ddd;
+            border-radius: 0 0 4px 4px;
+            padding: 12px;
+            margin: 0;
+            overflow-x: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            line-height: 1.4;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>AI可视化生成测试</h1>
+        
+        <div class="form-group">
+            <label for="visualizationType">可视化类型:</label>
+            <select id="visualizationType">
+                <option value="auto">自动选择</option>
+                <option value="table">表格</option>
+                <option value="chart">图表</option>
+            </select>
+        </div>
+        
+        <div class="form-group">
+            <label for="query">可视化需求描述:</label>
+            <textarea id="query" placeholder="请描述您希望如何可视化这些数据，例如：'生成一个按部门统计平均薪资的柱状图' 或 '创建一个包含所有用户信息的表格'"></textarea>
+        </div>
+        
+        <div class="form-group">
+            <label for="testData">测试数据 (JSON格式):</label>
+            <textarea id="testData" placeholder="输入JSON格式的测试数据">[
+  {"name": "张三", "age": 25, "salary": 8000, "department": "技术部"},
+  {"name": "李四", "age": 30, "salary": 12000, "department": "销售部"},
+  {"name": "王五", "age": 28, "salary": 10000, "department": "技术部"},
+  {"name": "赵六", "age": 35, "salary": 15000, "department": "管理部"},
+  {"name": "钱七", "age": 27, "salary": 9000, "department": "技术部"}
+]</textarea>
+        </div>
+        
+        <button onclick="generateVisualization()" id="generateBtn">生成可视化代码</button>
+        
+        <div id="result" class="result" style="display: none;"></div>
+        
+        <div id="visualizationPreview" class="visualization-preview" style="display: none;">
+            <h3>可视化预览</h3>
+            <div id="previewContent"></div>
+        </div>
+        
+        <div id="codePreview" class="visualization-preview" style="display: none;">
+            <h3>生成的代码</h3>
+            <div class="tabs">
+                <button class="tab-button active" onclick="showTab('component')">组件代码</button>
+                <button class="tab-button" onclick="showTab('processing')">数据处理</button>
+                <button class="tab-button" onclick="showTab('config')">配置JSON</button>
+            </div>
+            <div id="componentCode" class="tab-content active">
+                <div class="code-header">
+                    <span>React组件代码</span>
+                    <button onclick="copyCode('component')" class="copy-btn">复制</button>
+                </div>
+                <pre class="code-block"><code id="componentCodeContent"></code></pre>
+            </div>
+            <div id="processingCode" class="tab-content">
+                <div class="code-header">
+                    <span>数据处理代码</span>
+                    <button onclick="copyCode('processing')" class="copy-btn">复制</button>
+                </div>
+                <pre class="code-block"><code id="processingCodeContent"></code></pre>
+            </div>
+            <div id="configCode" class="tab-content">
+                <div class="code-header">
+                    <span>配置JSON</span>
+                    <button onclick="copyCode('config')" class="copy-btn">复制</button>
+                </div>
+                <pre class="code-block"><code id="configCodeContent"></code></pre>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        async function generateVisualization() {
+            const btn = document.getElementById('generateBtn');
+            const resultDiv = document.getElementById('result');
+            const previewDiv = document.getElementById('visualizationPreview');
+            const previewContent = document.getElementById('previewContent');
+            
+            // 获取输入数据
+            const visualizationType = document.getElementById('visualizationType').value;
+            const query = document.getElementById('query').value;
+            const testDataText = document.getElementById('testData').value;
+            
+            if (!query.trim()) {
+                showResult('请输入可视化需求描述', 'error');
+                return;
+            }
+            
+            let testData;
+            try {
+                testData = JSON.parse(testDataText);
+            } catch (e) {
+                showResult('测试数据格式错误，请检查JSON格式', 'error');
+                return;
+            }
+            
+            // 显示加载状态
+            btn.disabled = true;
+            btn.textContent = '生成中...';
+            showResult('正在生成可视化代码...', 'loading');
+            
+            try {
+                const response = await fetch('/api/v1/generate-visualization', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        data: testData,
+                        query: query,
+                        visualization_type: visualizationType,
+                        options: {}
+                    }),
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok && result.success) {
+                    showResult(`可视化生成成功！类型: ${result.visualization_type}`, 'success');
+                    renderVisualization(result.visualization_type, result.config, testData);
+                    generateCode(result.visualization_type, result.config, testData, query);
+                } else {
+                    showResult(`生成失败: ${result.error || '未知错误'}`, 'error');
+                }
+            } catch (error) {
+                console.error('请求失败:', error);
+                showResult(`请求失败: ${error.message}`, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '生成可视化代码';
+            }
+        }
+        
+        function showResult(message, type) {
+            const resultDiv = document.getElementById('result');
+            resultDiv.textContent = message;
+            resultDiv.className = `result ${type}`;
+            resultDiv.style.display = 'block';
+        }
+        
+        function renderVisualization(type, config, data) {
+            const previewDiv = document.getElementById('visualizationPreview');
+            const previewContent = document.getElementById('previewContent');
+            
+            previewContent.innerHTML = '';
+            
+            if (type === 'table') {
+                // 渲染表格
+                const table = document.createElement('table');
+                
+                // 创建表头
+                const thead = document.createElement('thead');
+                const headerRow = document.createElement('tr');
+                
+                if (config.columns && config.columns.length > 0) {
+                    config.columns.forEach(column => {
+                        const th = document.createElement('th');
+                        th.textContent = column.title || column.dataIndex;
+                        headerRow.appendChild(th);
+                    });
+                } else if (data.length > 0) {
+                    // 如果没有列配置，使用数据字段
+                    Object.keys(data[0]).forEach(key => {
+                        const th = document.createElement('th');
+                        th.textContent = key;
+                        headerRow.appendChild(th);
+                    });
+                }
+                
+                thead.appendChild(headerRow);
+                table.appendChild(thead);
+                
+                // 创建表体
+                const tbody = document.createElement('tbody');
+                const dataSource = config.dataSource || data;
+                
+                dataSource.forEach(row => {
+                    const tr = document.createElement('tr');
+                    
+                    if (config.columns && config.columns.length > 0) {
+                        config.columns.forEach(column => {
+                            const td = document.createElement('td');
+                            td.textContent = row[column.dataIndex] || '';
+                            tr.appendChild(td);
+                        });
+                    } else {
+                        Object.values(row).forEach(value => {
+                            const td = document.createElement('td');
+                            td.textContent = value || '';
+                            tr.appendChild(td);
+                        });
+                    }
+                    
+                    tbody.appendChild(tr);
+                });
+                
+                table.appendChild(tbody);
+                
+                const tableContainer = document.createElement('div');
+                tableContainer.className = 'table-container';
+                tableContainer.appendChild(table);
+                previewContent.appendChild(tableContainer);
+                
+            } else if (type === 'chart') {
+                // 渲染图表占位符
+                const chartDiv = document.createElement('div');
+                chartDiv.className = 'chart-container';
+                chartDiv.innerHTML = `
+                    <div style="display: flex; align-items: center; justify-content: center; height: 100%; color: #666;">
+                        <div style="text-align: center;">
+                            <div style="font-size: 24px; margin-bottom: 10px;">📊</div>
+                            <div>图表配置已生成</div>
+                            <div style="font-size: 12px; margin-top: 5px;">需要在React环境中使用ECharts渲染</div>
+                        </div>
+                    </div>
+                `;
+                previewContent.appendChild(chartDiv);
+                
+                // 显示配置信息
+                const configInfo = document.createElement('div');
+                configInfo.style.marginTop = '20px';
+                configInfo.innerHTML = `
+                    <h4>图表配置:</h4>
+                    <pre style="background: #f5f5f5; padding: 10px; border-radius: 4px; overflow-x: auto;">${JSON.stringify(config, null, 2)}</pre>
+                `;
+                previewContent.appendChild(configInfo);
+            }
+            
+            previewDiv.style.display = 'block';
+        }
+        
+        function generateCode(type, config, data, query) {
+            const dataInfo = {
+                rowCount: data.length,
+                columns: data.length > 0 ? Object.keys(data[0]) : [],
+                sampleData: data.slice(0, 3)
+            };
+
+            // 生成组件代码
+            let componentCode = '';
+            if (type === 'table') {
+                componentCode = `// 基于 ${dataInfo.rowCount} 行数据生成的表格组件
+// 数据字段: ${dataInfo.columns.join(', ')}
+// 用户需求: ${query}
+// 生成时间: ${new Date().toLocaleString()}
+
+import React from 'react';
+import { Table } from 'antd';
+
+interface TableData {
+${dataInfo.columns.map(col => `  ${col}: any;`).join('\n')}
+}
+
+interface GeneratedTableProps {
+  data?: TableData[];
+  loading?: boolean;
+}
+
+const GeneratedTable: React.FC<GeneratedTableProps> = ({ 
+  data = ${JSON.stringify(data, null, 2)}, 
+  loading = false 
+}) => {
+  // 表格配置 - 基于AI生成的配置
+  const tableConfig = ${JSON.stringify(config, null, 2)};
+
+  return (
+    <div className="w-full overflow-x-auto">
+      <Table 
+        {...tableConfig}
+        dataSource={data}
+        loading={loading}
+      />
+    </div>
+  );
+};
+
+export default GeneratedTable;`;
+            } else if (type === 'chart') {
+                componentCode = `// 基于 ${dataInfo.rowCount} 行数据生成的图表组件
+// 数据字段: ${dataInfo.columns.join(', ')}
+// 用户需求: ${query}
+// 生成时间: ${new Date().toLocaleString()}
+
+import React, { useEffect, useRef } from 'react';
+import * as echarts from 'echarts';
+
+interface ChartData {
+${dataInfo.columns.map(col => `  ${col}: any;`).join('\n')}
+}
+
+interface GeneratedChartProps {
+  data?: ChartData[];
+  height?: string | number;
+}
+
+const GeneratedChart: React.FC<GeneratedChartProps> = ({ 
+  data = ${JSON.stringify(data, null, 2)}, 
+  height = '400px' 
+}) => {
+  const chartRef = useRef<HTMLDivElement>(null);
+  const chartInstance = useRef<echarts.ECharts | null>(null);
+
+  // 图表配置 - 基于AI生成的配置
+  const chartConfig = ${JSON.stringify(config, null, 2)};
+
+  useEffect(() => {
+    if (chartRef.current) {
+      if (chartInstance.current) {
+        chartInstance.current.dispose();
+      }
+      chartInstance.current = echarts.init(chartRef.current);
+      chartInstance.current.setOption(chartConfig);
+    }
+
+    return () => {
+      if (chartInstance.current) {
+        chartInstance.current.dispose();
+      }
+    };
+  }, [chartConfig]);
+
+  return (
+    <div 
+      ref={chartRef} 
+      style={{ width: '100%', height }}
+      className="border border-gray-200 rounded-lg"
+    />
+  );
+};
+
+export default GeneratedChart;`;
+            }
+
+            // 生成数据处理代码
+            const numericColumns = dataInfo.columns.filter(col => 
+                data.some(row => typeof row[col] === 'number')
+            );
+            const stringColumns = dataInfo.columns.filter(col => 
+                data.some(row => typeof row[col] === 'string')
+            );
+
+            const processingCode = `// 数据处理工具函数
+// 基于原始响应数据 ${dataInfo.rowCount} 行，${dataInfo.columns.length} 个字段
+// 用户需求: ${query}
+// 生成时间: ${new Date().toLocaleString()}
+
+// 数据类型定义
+interface RawData {
+${dataInfo.columns.map(col => `  ${col}: any;`).join('\n')}
+}
+
+interface ProcessedData extends RawData {
+  // 处理后的数据可能包含额外的计算字段
+}
+
+// 1. 数据预处理和清理
+export const processRawData = (rawData: RawData[]): ProcessedData[] => {
+  // 清理空值和无效数据
+  const cleanedData = rawData.filter(row => 
+    row !== null && row !== undefined && Object.keys(row).length > 0
+  );
+  
+  // 数据类型转换和标准化
+  const processedData = cleanedData.map(row => ({
+    ...row,
+    // 数值字段转换
+${numericColumns.map(col => `    ${col}: Number(row.${col}) || 0,`).join('\n')}
+    // 字符串字段清理
+${stringColumns.map(col => `    ${col}: String(row.${col} || '').trim(),`).join('\n')}
+  }));
+  
+  return processedData;
+};
+
+// 2. 数据聚合函数
+export const aggregateData = <T extends keyof RawData>(
+  data: ProcessedData[], 
+  groupBy: T, 
+  aggregateField: keyof RawData,
+  operation: 'sum' | 'avg' | 'count' | 'max' | 'min' = 'avg'
+): Array<{ [K in T]: any } & { value: number }> => {
+  const groups: Record<string, number[]> = {};
+  
+  data.forEach(row => {
+    const key = String(row[groupBy]);
+    if (!groups[key]) {
+      groups[key] = [];
+    }
+    const value = Number(row[aggregateField]);
+    if (!isNaN(value)) {
+      groups[key].push(value);
+    }
+  });
+  
+  return Object.entries(groups).map(([key, values]) => {
+    let result: number;
+    switch (operation) {
+      case 'sum':
+        result = values.reduce((sum, val) => sum + val, 0);
+        break;
+      case 'avg':
+        result = values.reduce((sum, val) => sum + val, 0) / values.length;
+        break;
+      case 'count':
+        result = values.length;
+        break;
+      case 'max':
+        result = Math.max(...values);
+        break;
+      case 'min':
+        result = Math.min(...values);
+        break;
+      default:
+        result = values.reduce((sum, val) => sum + val, 0) / values.length;
+    }
+    
+    return {
+      [groupBy]: key,
+      value: result
+    } as any;
+  });
+};
+
+// 3. 数据过滤函数
+export const filterData = (
+  data: ProcessedData[], 
+  conditions: Partial<Record<keyof RawData, any | ((value: any) => boolean)>>
+): ProcessedData[] => {
+  return data.filter(row => {
+    return Object.entries(conditions).every(([field, condition]) => {
+      const value = row[field as keyof RawData];
+      
+      if (typeof condition === 'function') {
+        return condition(value);
+      }
+      
+      return value === condition;
+    });
+  });
+};
+
+// 4. 数据排序函数
+export const sortData = <T extends keyof RawData>(
+  data: ProcessedData[], 
+  sortField: T, 
+  order: 'asc' | 'desc' = 'asc'
+): ProcessedData[] => {
+  return [...data].sort((a, b) => {
+    const aVal = a[sortField];
+    const bVal = b[sortField];
+    
+    if (typeof aVal === 'number' && typeof bVal === 'number') {
+      return order === 'asc' ? aVal - bVal : bVal - aVal;
+    }
+    
+    const aStr = String(aVal || '');
+    const bStr = String(bVal || '');
+    
+    if (order === 'asc') {
+      return aStr.localeCompare(bStr);
+    } else {
+      return bStr.localeCompare(aStr);
+    }
+  });
+};
+
+// 使用示例:
+// const processedData = processRawData(rawData);
+// const aggregatedData = aggregateData(processedData, 'department', 'salary', 'avg');
+// const filteredData = filterData(processedData, { status: 'active' });
+// const sortedData = sortData(processedData, 'salary', 'desc');`;
+
+            // 显示代码
+            document.getElementById('componentCodeContent').textContent = componentCode;
+            document.getElementById('processingCodeContent').textContent = processingCode;
+            document.getElementById('configCodeContent').textContent = JSON.stringify(config, null, 2);
+            
+            document.getElementById('codePreview').style.display = 'block';
+        }
+
+        function showTab(tabName) {
+            // 隐藏所有标签页内容
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            
+            // 移除所有标签按钮的active类
+            document.querySelectorAll('.tab-button').forEach(button => {
+                button.classList.remove('active');
+            });
+            
+            // 显示选中的标签页内容
+            document.getElementById(tabName + 'Code').classList.add('active');
+            
+            // 激活对应的标签按钮
+            event.target.classList.add('active');
+        }
+
+        function copyCode(type) {
+            let code = '';
+            if (type === 'component') {
+                code = document.getElementById('componentCodeContent').textContent;
+            } else if (type === 'processing') {
+                code = document.getElementById('processingCodeContent').textContent;
+            } else if (type === 'config') {
+                code = document.getElementById('configCodeContent').textContent;
+            }
+            
+            navigator.clipboard.writeText(code).then(() => {
+                alert('代码已复制到剪贴板');
+            }).catch(() => {
+                alert('复制失败，请手动复制');
+            });
+        }
+
+        // 页面加载时设置默认查询
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('query').value = '生成一个按部门统计平均薪资的柱状图';
+        });
+    </script>
+</body>
+</html> 

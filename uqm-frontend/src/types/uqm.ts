@@ -16,4 +16,5 @@ export interface UQMExecuteResponse {
   error?: string;
   execution_time?: number;
   total_records?: number;
+  config?: any; // AI 返回的图表等配置
 } 

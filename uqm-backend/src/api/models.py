@@ -324,11 +324,11 @@ class JobStatusResponse(BaseModel):
     class Config:
         schema_extra = {
             "example": {
-                "job_id": "job_123456",
+                "job_id": "job_123",
                 "status": "completed",
-                "created_at": "2023-12-01T10:00:00Z",
-                "started_at": "2023-12-01T10:00:01Z",
-                "completed_at": "2023-12-01T10:02:30Z",
+                "created_at": "2024-01-01T00:00:00Z",
+                "started_at": "2024-01-01T00:00:01Z",
+                "completed_at": "2024-01-01T00:00:05Z",
                 "progress": 100.0,
                 "result": {
                     "success": True,
@@ -336,3 +336,77 @@ class JobStatusResponse(BaseModel):
                 }
             }
         }
+
+
+class AIGenerateRequest(BaseModel):
+    """AI生成请求模型"""
+    query: str = Field(..., description="自然语言查询描述")
+    options: Optional[Dict[str, Any]] = Field(default_factory=dict, description="生成选项")
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "query": "查询所有用户的订单总金额",
+                "options": {
+                    "include_parameters": True,
+                    "include_options": True
+                }
+            }
+        }
+
+
+class AIGenerateResponse(BaseModel):
+    """AI生成响应模型 - 直接返回schema"""
+    uqm: Dict[str, Any] = Field(..., description="UQM定义")
+    parameters: Optional[Dict[str, Any]] = Field(default_factory=dict, description="参数定义")
+    options: Optional[Dict[str, Any]] = Field(default_factory=dict, description="执行选项")
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "uqm": {
+                    "metadata": {
+                        "name": "用户订单总金额查询",
+                        "description": "查询所有用户的订单总金额，按用户分组"
+                    },
+                    "steps": [
+                        {
+                            "name": "user_orders",
+                            "type": "query",
+                            "config": {
+                                "data_source": "orders",
+                                "dimensions": ["user_id"],
+                                "calculated_fields": [
+                                    {
+                                        "name": "total_amount",
+                                        "expression": "SUM(amount)"
+                                    }
+                                ],
+                                "group_by": ["user_id"]
+                            }
+                        }
+                    ],
+                    "output": "user_orders"
+                },
+                "parameters": {},
+                "options": {
+                    "cache_enabled": True
+                }
+            }
+        }
+
+
+class AIGenerateVisualizationRequest(BaseModel):
+    """AI生成可视化代码请求模型"""
+    data: List[Dict[str, Any]]
+    query: str
+    visualization_type: str = "auto"  # "table", "chart", "auto"
+    options: Optional[Dict[str, Any]] = None
+
+
+class AIGenerateVisualizationResponse(BaseModel):
+    """AI生成可视化代码响应模型"""
+    success: bool
+    visualization_type: str  # "table" 或 "chart"
+    config: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None

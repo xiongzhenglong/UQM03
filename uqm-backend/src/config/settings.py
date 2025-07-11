@@ -53,6 +53,17 @@ class Settings(BaseSettings):
     ENABLE_METRICS: bool = Field(default=True, description="是否启用指标监控")
     METRICS_PATH: str = Field(default="/metrics", description="指标接口路径")
     
+    # AI配置
+    AI_API_BASE: str = Field(default="https://openrouter.ai/api/v1", description="AI API基础URL")
+    AI_API_KEY: Optional[str] = Field(default=None, description="AI API密钥")
+    AI_MODEL: str = Field(default="anthropic/claude-3.5-sonnet", description="AI模型名称")
+    AI_MAX_TOKENS: int = Field(default=4000, description="AI最大token数")
+    AI_TEMPERATURE: float = Field(default=0.1, description="AI温度参数")
+    
+    # 文档文件路径配置
+    UQM_GUIDE_FILE: str = Field(default="UQM_JSON_SCHEMA_权威技术参考手册.md", description="UQM指南文件路径")
+    DB_SCHEMA_FILE: str = Field(default="数据库表结构简化描述.md", description="数据库表结构文件路径")
+
     # 新增：全局默认数据库类型
     DEFAULT_DB_TYPE: str = Field(default="postgresql", description="全局默认数据库类型，可选：postgresql、mysql、sqlite")
     

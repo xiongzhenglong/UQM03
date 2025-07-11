@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UQM AI 查询测试</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div class="max-w-4xl mx-auto p-8">
+        <h1 class="text-3xl font-bold text-gray-900 mb-8">UQM AI 查询测试</h1>
+        
+        <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+            <h2 class="text-xl font-semibold mb-4">API 连接测试</h2>
+            
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">
+                        自然语言查询
+                    </label>
+                    <textarea
+                        id="queryInput"
+                        placeholder="例如：查询所有用户的订单总金额"
+                        class="w-full h-20 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    ></textarea>
+                </div>
+                
+                <div class="flex gap-3">
+                    <button
+                        id="testGenerate"
+                        class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+                    >
+                        测试生成
+                    </button>
+                    <button
+                        id="testExecute"
+                        class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
+                    >
+                        测试执行
+                    </button>
+                    <button
+                        id="testGenerateAndExecute"
+                        class="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700"
+                    >
+                        生成并执行
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="bg-white rounded-lg shadow-md p-6">
+            <h2 class="text-xl font-semibold mb-4">测试结果</h2>
+            <div id="result" class="bg-gray-50 p-4 rounded-md min-h-32">
+                <p class="text-gray-500">点击上方按钮开始测试...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8000/api/v1';
+        
+        async function testGenerate() {
+            const query = document.getElementById('queryInput').value;
+            if (!query.trim()) {
+                alert('请输入查询内容');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE}/generate`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        query: query.trim(),
+                        options: {
+                            include_parameters: true,
+                            include_options: true
+                        }
+                    })
+                });
+                
+                const result = await response.json();
+                displayResult('生成测试', result, response.ok);
+            } catch (error) {
+                displayResult('生成测试', { error: error.message }, false);
+            }
+        }
+        
+        async function testExecute() {
+            const query = document.getElementById('queryInput').value;
+            if (!query.trim()) {
+                alert('请输入查询内容');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE}/generate-and-execute`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        query: query.trim(),
+                        options: {
+                            include_parameters: true,
+                            include_options: true
+                        }
+                    })
+                });
+                
+                const result = await response.json();
+                displayResult('执行测试', result, response.ok);
+            } catch (error) {
+                displayResult('执行测试', { error: error.message }, false);
+            }
+        }
+        
+        async function testGenerateAndExecute() {
+            const query = document.getElementById('queryInput').value;
+            if (!query.trim()) {
+                alert('请输入查询内容');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE}/generate-and-execute`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        query: query.trim(),
+                        options: {
+                            include_parameters: true,
+                            include_options: true
+                        }
+                    })
+                });
+                
+                const result = await response.json();
+                displayResult('生成并执行测试', result, response.ok);
+            } catch (error) {
+                displayResult('生成并执行测试', { error: error.message }, false);
+            }
+        }
+        
+        function displayResult(testName, data, success) {
+            const resultDiv = document.getElementById('result');
+            const timestamp = new Date().toLocaleString();
+            
+            resultDiv.innerHTML = `
+                <div class="mb-4">
+                    <h3 class="font-semibold ${success ? 'text-green-600' : 'text-red-600'}">
+                        ${testName} - ${success ? '成功' : '失败'}
+                    </h3>
+                    <p class="text-sm text-gray-500">时间: ${timestamp}</p>
+                </div>
+                <pre class="bg-white p-3 rounded border text-sm overflow-auto max-h-96">${JSON.stringify(data, null, 2)}</pre>
+            `;
+        }
+        
+        // 绑定事件
+        document.getElementById('testGenerate').addEventListener('click', testGenerate);
+        document.getElementById('testExecute').addEventListener('click', testExecute);
+        document.getElementById('testGenerateAndExecute').addEventListener('click', testGenerateAndExecute);
+        
+        // 设置默认查询
+        document.getElementById('queryInput').value = '查询所有用户的订单总金额';
+    </script>
+</body>
+</html> 
